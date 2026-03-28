@@ -360,22 +360,65 @@ class DatabaseService {
         }
 
         const isConn = await this.sqlite.isConnection(this.dbName, false);
+
         if (isConn.result) {
           this.db = await this.sqlite.retrieveConnection(this.dbName, false);
         } else {
-          this.db = await this.sqlite.createConnection(this.dbName, false, 'no-encryption', 1, false);
+          this.db = await this.sqlite.createConnection(
+              this.dbName,
+              false,
+              'no-encryption',
+              1,
+              false
+          );
         }
 
         await this.db.open();
 
+        // 🔥 ГЛАВНЫЙ FIX (native + web fallback)
+        const tables = await this.db.query(
+            `SELECT name FROM sqlite_master WHERE type='table'`
+        );
+
+        const isEmpty = !tables.values || tables.values.length === 0;
+
+        if (isEmpty) {
+          console.log('⚠️ Empty DB → copying from assets...');
+
+          try {
+            await this.db.close();
+          } catch {}
+
+          try {
+            await this.sqlite.closeConnection(this.dbName, false);
+          } catch {}
+
+          // 🔥 ВАЖНО: копирование базы
+          await this.sqlite.copyFromAssets();
+
+          // 🔥 reopen connection
+          this.db = await this.sqlite.createConnection(
+              this.dbName,
+              false,
+              'no-encryption',
+              1,
+              false
+          );
+
+          await this.db.open();
+        }
+
+        // ✅ WEB fallback (оставляем как у тебя)
         if (this.isWeb) {
           const hasCoreSchema = await this.hasCoreSchema();
+
           if (!hasCoreSchema) {
-            console.warn('Core tables are missing. Restoring database from assets...');
+            console.warn('Core tables missing → restoring DB...');
             await this.restoreWebDatabaseFromAssets();
           }
         }
 
+        // ✅ твои seed'ы (оставляем)
         await this.ensureRoadSafetyLawTablesAndSeed(this.db);
         await this.ensureExploitationTablesAndSeed(this.db);
         await this.ensureRoadMarkingsTablesAndSeed(this.db);
@@ -383,9 +426,9 @@ class DatabaseService {
         await this.ensureUserExamTestsColumns(this.db);
         await this.ensureCleanOfflineProgressState(this.db);
 
-        console.log('Database opened successfully');
+        console.log('✅ Database ready');
       } catch (err) {
-        console.error('Error initializing database', err);
+        console.error('❌ Error initializing database', err);
         this.initPromise = null;
         throw err;
       }
