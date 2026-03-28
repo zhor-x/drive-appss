@@ -1,0 +1,18 @@
+
+.settings-intro {
+  margin: 4px 4px 16px;
+   font-size: 15px;
+  line-height: 1.5;
+}
+
+.settings-list {
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.settings-danger-button {
+  margin-top: 16px;
+  --border-radius: 16px;
+  min-height: 52px;
+  font-weight: 700;
+}

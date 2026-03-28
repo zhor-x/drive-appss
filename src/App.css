@@ -1,0 +1,81 @@
+:root {
+  --app-accent: rgba(20, 143, 91, 0.58);
+  --app-accent-soft: #e9eef8;
+  --app-accent-pressed: #31ee41;
+  --app-success: #2fbf71;
+  --app-danger: #ef5b5b;
+  --app-warning: #f2c30f;
+  --app-bg-muted: #edf1f6;
+  --app-surface-muted: #e9eef8;
+  --app-text-main: #4d5f7c;
+  --app-text-muted: #64748b;
+  --app-progress-bg: rgb(242, 246, 252);
+
+  --primary: 149 29% 30%;
+  --primary-hover: 149 25% 24%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 38 26% 91%;
+  --secondary-foreground: 149 25% 24%;
+  --muted: 42 22% 93%;
+  --muted-foreground: 150 8% 44%;
+  --accent: 37 31% 82%;
+}
+
+.theme-drivego-preview {
+  --app-accent: rgb(20, 143, 91);
+  --app-accent-soft: #e9eef8;
+  --app-accent-pressed: #31ee41;
+  --app-success: #2fbf71;
+  --app-danger: #ef5b5b;
+  --app-warning: #f2c30f;
+  --app-bg-muted: #ffffff;
+  --app-surface-muted: #f8f8f8;
+  --app-text-main: #4d5f7c;
+  --app-text-muted: #64748b;
+  --app-progress-bg: rgb(242, 246, 252);
+
+  --ion-color-primary: #315844;
+  --ion-color-primary-rgb: 49, 88, 68;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #2b4d3c;
+  --ion-color-primary-tint: #466957;
+
+  --ion-color-secondary: #ef5b5b;
+  --ion-color-secondary-rgb: 143, 84, 76;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #7e4a43;
+  --ion-color-secondary-tint: #9a655e;
+}
+
+.main-tab-bar {
+  --background: #fcfaf6;
+  --border: 1px solid #e3dbce;
+  height: calc(72px + var(--ion-safe-area-bottom));
+  padding-bottom: var(--ion-safe-area-bottom);
+  box-shadow: 0 -8px 24px rgba(35, 45, 41, 0.05);
+}
+
+.main-tab-btn {
+  --color: #8d938e;
+  --color-selected: var(--app-accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.main-tab-btn ion-icon {
+  font-size: 30px;
+  margin-bottom: 4px;
+}
+
+.main-tab-btn ion-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+ion-progress-bar {
+  --background: var(--app-progress-bg);
+  --buffer-background: var(--app-progress-bg);
+}

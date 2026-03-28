@@ -1,0 +1,7 @@
+{
+  "name": "ionic-drive-app",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react-vite"
+}
