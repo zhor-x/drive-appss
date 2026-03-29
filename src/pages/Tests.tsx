@@ -97,7 +97,7 @@ const Tests: React.FC = () => {
                     {test.solved} / {test.total}
                   </div>
 
-                  <div className="test-ticket-caption">հարց լուծված է</div>
+                  <div className="test-ticket-caption">Վերջին թեստի արդյունք</div>
 
                   <IonProgressBar value={test.progress} className="test-ticket-progress" />
                 </button>
