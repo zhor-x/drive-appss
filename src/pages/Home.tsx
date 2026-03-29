@@ -1,29 +1,23 @@
 import {
+  IonButton,
+  IonButtons,
   IonCard,
   IonCardContent,
   IonContent,
   IonHeader,
-  IonButton,
-  IonButtons,
   IonIcon,
   IonPage,
   IonProgressBar,
   IonSpinner,
   IonTitle,
   IonToolbar,
+  useIonViewWillEnter,
 } from '@ionic/react';
-import {
-  carSportOutline,
-  layersOutline,
-  settingsOutline,
-  sparklesOutline,
-  starOutline,
-} from 'ionicons/icons';
-import { useIonViewWillEnter } from '@ionic/react';
-import React, { useCallback, useState } from 'react';
-import { useHistory } from 'react-router-dom';
-import { useLanguage } from '../context/LanguageContext';
-import { dbService, StatsSummary } from '../services/DatabaseService';
+import {carSportOutline, layersOutline, settingsOutline, sparklesOutline, starOutline,} from 'ionicons/icons';
+import React, {useCallback, useState} from 'react';
+import {useHistory} from 'react-router-dom';
+import {useLanguage} from '../context/LanguageContext';
+import {dbService, StatsSummary} from '../services/DatabaseService';
 import './Home.css';
 
 const initialStats: StatsSummary = {
@@ -104,12 +98,13 @@ const Home: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  <div>
                   <div className="stats-row">
                     <span>{t('questions_stat')}</span>
                     <strong>{stats.answered} {t('of')} {stats.total}</strong>
                   </div>
                   <IonProgressBar value={stats.total > 0 ? stats.answered / stats.total : 0} className="progress-main" />
-
+                  </div>
                   <div className="stats-split-row">
                     <div className="stats-split-item">
                       <div className="stats-split-head">
