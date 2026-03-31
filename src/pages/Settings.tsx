@@ -89,15 +89,18 @@ const Settings: React.FC = () => {
         isOpen={showClearConfirm}
         header={t('clear_statistics_title')}
         message={t('clear_statistics_message')}
+        cssClass="app-alert"
         buttons={[
           {
             text: t('cancel'),
             role: 'cancel',
+            cssClass: 'app-alert-cancel',
             handler: () => setShowClearConfirm(false),
           },
           {
             text: t('yes'),
             role: 'destructive',
+            cssClass: 'app-alert-danger',
             handler: () => {
               void handleClearStatistics();
             },

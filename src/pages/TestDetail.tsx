@@ -11,6 +11,8 @@ import {
     IonTitle,
     IonToolbar,
 } from '@ionic/react';
+import {useIonViewDidEnter, useIonViewWillLeave} from '@ionic/react';
+import {Capacitor} from '@capacitor/core';
 import {
     checkmarkCircleOutline,
     closeOutline,
@@ -21,14 +23,11 @@ import {
     starOutline,
     timeOutline,
 } from 'ionicons/icons';
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useHistory, useLocation, useParams} from 'react-router-dom';
 import {useLanguage} from '../context/LanguageContext';
 import {dbService, QuestionItem} from '../services/DatabaseService';
-import goodImage from '../assets/images/good.jpg';
-import notBadImage from '../assets/images/not-bad.jpg';
-import lilBadImage from '../assets/images/lil-bad.jpg';
-import badImage from '../assets/images/bad.jpg';
+import {getResultPresentation, getWrongAnswerAnalysis} from '../utils/resultPresentation';
 import './TestDetail.css';
 
 type AnswerState = {
@@ -36,20 +35,34 @@ type AnswerState = {
     isRight: boolean;
 };
 
-const questionImageModules = import.meta.glob('../assets/images/questions/**/*', {
-    eager: true,
-    import: 'default',
-}) as Record<string, string>;
+type CommitAnswerResult = {
+    committed: boolean;
+    answersSnapshot: Record<number, AnswerState>;
+};
 
-const questionImageByName = Object.entries(questionImageModules).reduce<Record<string, string>>((acc, [path, src]) => {
+type IonBackButtonEvent = CustomEvent<{
+    register: (priority: number, handler: () => void | Promise<void>) => void;
+}>;
+
+const countCorrectAnswers = (answersMap: Record<number, AnswerState>) =>
+    Object.values(answersMap).filter((answer) => answer.isRight).length;
+
+const questionImageLoaders = import.meta.glob('../assets/images/questions/**/*', {
+    import: 'default',
+    query: '?url',
+}) as Record<string, () => Promise<string>>;
+
+const questionImageLoaderByName = Object.entries(questionImageLoaders).reduce<Record<string, () => Promise<string>>>((acc, [path, loader]) => {
     const fileName = path.split('/').pop()?.toLowerCase();
     if (fileName) {
-        acc[fileName] = src;
+        acc[fileName] = loader;
     }
     return acc;
 }, {});
 
-const resolveLocalQuestionImage = (imagePath?: string | null): string | null => {
+const questionImageSrcCache = new Map<string, string | null>();
+
+const loadLocalQuestionImage = async (imagePath?: string | null): Promise<string | null> => {
     if (!imagePath) {
         return null;
     }
@@ -59,10 +72,30 @@ const resolveLocalQuestionImage = (imagePath?: string | null): string | null => 
         return null;
     }
 
-    return questionImageByName[fileName] ?? null;
+    const cachedSrc = questionImageSrcCache.get(fileName);
+    if (cachedSrc !== undefined) {
+        return cachedSrc;
+    }
+
+    const loader = questionImageLoaderByName[fileName];
+    if (!loader) {
+        questionImageSrcCache.set(fileName, null);
+        return null;
+    }
+
+    try {
+        const src = await loader();
+        questionImageSrcCache.set(fileName, src);
+        return src;
+    } catch (err) {
+        console.warn('Failed to load question image', imagePath, err);
+        questionImageSrcCache.set(fileName, null);
+        return null;
+    }
 };
 
 const EXAM_DURATION_SECONDS = 30 * 60;
+const HARDWARE_BACK_PRIORITY = 1000;
 
 const TestDetail: React.FC = () => {
     const {id} = useParams<{ id: string }>();
@@ -86,6 +119,7 @@ const TestDetail: React.FC = () => {
     const [examReviewMode, setExamReviewMode] = useState(false);
     const [examTimeLeftSec, setExamTimeLeftSec] = useState(EXAM_DURATION_SECONDS);
     const [examTimedOut, setExamTimedOut] = useState(false);
+    const [currentQuestionImageSrc, setCurrentQuestionImageSrc] = useState<string | null>(null);
 
     const completionSavedRef = useRef(false);
     const examFinalizedRef = useRef(false);
@@ -93,6 +127,8 @@ const TestDetail: React.FC = () => {
     const touchStartYRef = useRef<number | null>(null);
     const startedAtRef = useRef<number>(Date.now());
     const scrollBodyRef = useRef<HTMLDivElement | null>(null);
+    const backButtonListenerRef = useRef<((event: IonBackButtonEvent) => void) | null>(null);
+    const hardwareBackHandlerRef = useRef<() => void>(() => {});
 
     useEffect(() => {
         let cancelled = false;
@@ -119,17 +155,22 @@ const TestDetail: React.FC = () => {
 
                 if (!cancelled) {
                     setQuestions(data);
+                    setLoading(false);
+                }
 
-                    const questionIds = data.map((q) => q.id);
-                    const favoriteIds = await dbService.getFavoriteQuestionIds(questionIds);
+                const questionIds = data.map((q) => q.id);
+                if (questionIds.length === 0) {
+                    return;
+                }
 
-                    if (!cancelled) {
-                        const byId = favoriteIds.reduce<Record<number, boolean>>((acc, qId) => {
-                            acc[qId] = true;
-                            return acc;
-                        }, {});
-                        setFavoriteQuestionIds(byId);
-                    }
+                const favoriteIds = await dbService.getFavoriteQuestionIds(questionIds);
+
+                if (!cancelled) {
+                    const byId = favoriteIds.reduce<Record<number, boolean>>((acc, qId) => {
+                        acc[qId] = true;
+                        return acc;
+                    }, {});
+                    setFavoriteQuestionIds(byId);
                 }
             } catch (err) {
                 console.error('Failed to load quiz data', err);
@@ -160,16 +201,42 @@ const TestDetail: React.FC = () => {
     }, [currentIndex]);
 
     const currentQuestion = questions[currentIndex];
+
+    useEffect(() => {
+        let cancelled = false;
+
+        setCurrentQuestionImageSrc(null);
+
+        const imagePath = currentQuestion?.image;
+        if (!imagePath) {
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        const loadImage = async () => {
+            const src = await loadLocalQuestionImage(imagePath);
+            if (!cancelled) {
+                setCurrentQuestionImageSrc(src);
+            }
+        };
+
+        void loadImage();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentQuestion?.image]);
+
     const currentAnswer = currentQuestion ? answersByQuestionId[currentQuestion.id] : undefined;
     const draftSelectedAnswerId = currentQuestion ? draftAnswersByQuestionId[currentQuestion.id] ?? null : null;
     const selectedAnswerId = draftSelectedAnswerId ?? currentAnswer?.answerId ?? null;
     const isAnswered = Boolean(currentAnswer);
     const hasDraftSelection = selectedAnswerId !== null;
     const isCurrentFavorite = currentQuestion ? Boolean(favoriteQuestionIds[currentQuestion.id]) : false;
-    const currentQuestionImageSrc = useMemo(() => resolveLocalQuestionImage(currentQuestion?.image), [currentQuestion?.image]);
 
     const score = useMemo(
-        () => Object.values(answersByQuestionId).filter((answer) => answer.isRight).length,
+        () => countCorrectAnswers(answersByQuestionId),
         [answersByQuestionId],
     );
 
@@ -181,38 +248,8 @@ const TestDetail: React.FC = () => {
     const isPassed = score >= passThreshold;
     const wrongCount = Math.max(questions.length - score, 0);
 
-    const theoryResult = useMemo(() => {
-        const total = Math.max(questions.length, 1);
-        const percent = Math.round((score / total) * 100);
-
-        if (percent >= 85) {
-            return {text: 'Գերազանց արդյունք', tone: 'good' as const, image: goodImage};
-        }
-        if (percent >= 65) {
-            return {text: 'Լավ արդյունք', tone: 'good' as const, image: notBadImage};
-        }
-        if (percent >= 45) {
-            return {text: 'Վատ չէ, բայց դեռ աշխատելու տեղ կա', tone: 'mid' as const, image: lilBadImage};
-        }
-
-        return {text: 'Կա աշխատելու տեղ', tone: 'bad' as const, image: badImage};
-    }, [questions.length, score]);
-
-    const theoryAnswerAnalysis = useMemo(() => {
-        if (wrongCount === 0) {
-            return 'Սխալներ չկան';
-        }
-
-        if (wrongCount <= 2) {
-            return 'Սխալ՝ անուշադրությունից';
-        }
-
-        if (wrongCount <= 5) {
-            return 'Կան անուշադրության սխալներ';
-        }
-
-        return 'Պետք է կրկնել թեման';
-    }, [wrongCount]);
+    const resultPresentation = useMemo(() => getResultPresentation(score, questions.length), [questions.length, score]);
+    const theoryAnswerAnalysis = useMemo(() => getWrongAnswerAnalysis(wrongCount), [wrongCount]);
 
     const formattedResultDuration = useMemo(() => {
         const totalSec = Math.max(resultDurationSec, 0);
@@ -227,6 +264,14 @@ const TestDetail: React.FC = () => {
         const secs = totalSec % 60;
         return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }, [examTimeLeftSec]);
+
+    const examResultAnalysis = useMemo(() => {
+        if (examTimedOut) {
+            return 'Ժամանակը ավարտվել է';
+        }
+
+        return isPassed ? t('exam_passed') : t('exam_failed');
+    }, [examTimedOut, isPassed, t]);
 
     const shouldRevealAnswerFeedback = isTheoryMode ? isAnswered : examReviewMode;
     const canGoNext = hasDraftSelection || isAnswered || (!isTheoryMode && examReviewMode);
@@ -255,8 +300,13 @@ const TestDetail: React.FC = () => {
         });
     };
 
-    const commitCurrentAnswer = async () => {
-        if (!currentQuestion) return true;
+    const commitCurrentAnswer = async (): Promise<CommitAnswerResult> => {
+        if (!currentQuestion) {
+            return {
+                committed: true,
+                answersSnapshot: answersByQuestionId,
+            };
+        }
 
         const questionId = currentQuestion.id;
         const committedAnswer = answersByQuestionId[questionId];
@@ -270,27 +320,37 @@ const TestDetail: React.FC = () => {
                     return next;
                 });
             }
-            return true;
+            return {
+                committed: true,
+                answersSnapshot: answersByQuestionId,
+            };
         }
 
         if (draftAnswerId === undefined) {
-            return false;
+            return {
+                committed: false,
+                answersSnapshot: answersByQuestionId,
+            };
         }
 
         const selectedAnswer = currentQuestion.answers.find((answer) => answer.id === draftAnswerId);
         if (!selectedAnswer) {
-            return false;
+            return {
+                committed: false,
+                answersSnapshot: answersByQuestionId,
+            };
         }
 
         const isRight = selectedAnswer.is_right;
-
-        setAnswersByQuestionId((prev) => ({
-            ...prev,
+        const nextAnswersByQuestionId = {
+            ...answersByQuestionId,
             [questionId]: {
                 answerId: draftAnswerId,
                 isRight,
             },
-        }));
+        };
+
+        setAnswersByQuestionId(nextAnswersByQuestionId);
 
         setDraftAnswersByQuestionId((prev) => {
             const next = {...prev};
@@ -306,10 +366,13 @@ const TestDetail: React.FC = () => {
             console.error('Failed to save answer', err);
         }
 
-        return true;
+        return {
+            committed: true,
+            answersSnapshot: nextAnswersByQuestionId,
+        };
     };
 
-    const finalizeExamIfNeeded = async (elapsedSeconds: number) => {
+    const finalizeExamIfNeeded = async (elapsedSeconds: number, correctAnswersCount: number) => {
         if (isTheoryMode || completionSavedRef.current) {
             return;
         }
@@ -317,18 +380,19 @@ const TestDetail: React.FC = () => {
         completionSavedRef.current = true;
 
         try {
-            await dbService.recordExamTestCompletion(testId, score, questions.length, elapsedSeconds);
+            await dbService.recordExamTestCompletion(testId, correctAnswersCount, questions.length, elapsedSeconds);
         } catch (err) {
             console.error('Failed to save exam completion', err);
         }
     };
 
-    const finishExam = async (timedOut = false) => {
+    const finishExam = async (timedOut = false, answersSnapshot: Record<number, AnswerState> = answersByQuestionId) => {
         if (isTheoryMode || examFinalizedRef.current) {
             return;
         }
 
         examFinalizedRef.current = true;
+        const finalScore = countCorrectAnswers(answersSnapshot);
 
         const elapsedSeconds = Math.min(
             Math.round((Date.now() - startedAtRef.current) / 1000),
@@ -339,7 +403,7 @@ const TestDetail: React.FC = () => {
         setExamTimeLeftSec(Math.max(EXAM_DURATION_SECONDS - elapsedSeconds, 0));
         setExamTimedOut(timedOut);
         setExamReviewMode(true);
-        await finalizeExamIfNeeded(elapsedSeconds);
+        await finalizeExamIfNeeded(elapsedSeconds, finalScore);
         setShowResult(true);
     };
 
@@ -380,7 +444,7 @@ const TestDetail: React.FC = () => {
             return;
         }
 
-        const committed = await commitCurrentAnswer();
+        const { committed, answersSnapshot } = await commitCurrentAnswer();
         if (!committed) {
             return;
         }
@@ -391,7 +455,7 @@ const TestDetail: React.FC = () => {
         }
 
         if (!isTheoryMode) {
-            await finishExam(false);
+            await finishExam(false, answersSnapshot);
             return;
         }
 
@@ -399,18 +463,68 @@ const TestDetail: React.FC = () => {
         setShowResult(true);
     };
 
-    const handleClose = () => {
+    const navigateBackFromDetail = () => {
         if (isTheoryMode) {
-            history.push('/theory-tests');
+            history.replace('/theory-tests');
+            return;
+        }
+
+        if (showResult || examReviewMode) {
+            history.replace('/tests');
             return;
         }
 
         setShowExitConfirm(true);
     };
 
+    hardwareBackHandlerRef.current = () => {
+        if (showExitConfirm) {
+            setShowExitConfirm(false);
+            return;
+        }
+
+        navigateBackFromDetail();
+    };
+
+    const attachBackButtonListener = useCallback(() => {
+        if (Capacitor.getPlatform() !== 'android' || backButtonListenerRef.current || typeof document === 'undefined') {
+            return;
+        }
+
+        const listener = (event: IonBackButtonEvent) => {
+            event.detail.register(HARDWARE_BACK_PRIORITY, () => {
+                hardwareBackHandlerRef.current();
+            });
+        };
+
+        document.addEventListener('ionBackButton', listener as EventListener);
+        backButtonListenerRef.current = listener;
+    }, []);
+
+    const detachBackButtonListener = useCallback(() => {
+        if (!backButtonListenerRef.current || typeof document === 'undefined') {
+            return;
+        }
+
+        document.removeEventListener('ionBackButton', backButtonListenerRef.current as EventListener);
+        backButtonListenerRef.current = null;
+    }, []);
+
+    useIonViewDidEnter(() => {
+        attachBackButtonListener();
+    });
+
+    useIonViewWillLeave(() => {
+        detachBackButtonListener();
+    });
+
+    const handleClose = () => {
+        navigateBackFromDetail();
+    };
+
     const handleExitConfirm = () => {
         setShowExitConfirm(false);
-        history.push('/tests');
+        history.replace('/tests');
     };
 
     const handleExitCancel = () => {
@@ -438,7 +552,7 @@ const TestDetail: React.FC = () => {
     };
 
     const shareTheoryResult = async () => {
-        const text = `${theoryResult.text}\n${score} / ${questions.length} հարց\nԺամանակ՝ ${formattedResultDuration}`;
+        const text = `${resultPresentation.text}\n${score} / ${questions.length} հարց\nԺամանակ՝ ${formattedResultDuration}`;
 
         try {
             if (navigator.share) {
@@ -546,11 +660,11 @@ const TestDetail: React.FC = () => {
                             <h1 className="theory-result-header-title">Արդյունք</h1>
 
                             <div className="theory-result-card">
-                                <h2 className={`theory-result-status is-${theoryResult.tone}`}>{theoryResult.text}</h2>
+                                <h2 className={`theory-result-status is-${resultPresentation.tone}`}>{resultPresentation.text}</h2>
                                 <p className="theory-result-analysis">{theoryAnswerAnalysis}</p>
 
                                 <div className="theory-result-illustration-box">
-                                    <img src={theoryResult.image} alt="result" className="theory-result-illustration"/>
+                                    <img src={resultPresentation.image} alt="result" className="theory-result-illustration"/>
                                 </div>
 
                                 <div className="theory-result-meta-row">
@@ -591,55 +705,51 @@ const TestDetail: React.FC = () => {
         }
 
         return (
-            <IonPage>
-                <IonHeader className="ion-no-border">
-                    <IonToolbar>
-                        <IonTitle>{t('result')}</IonTitle>
-                    </IonToolbar>
-                </IonHeader>
+            <IonPage className="theory-detail-page">
+                <IonContent fullscreen className="theory-detail-content">
+                    <div className="theory-result-wrap theory-result-screen">
+                        <div className="close-box">
+                            <button type="button" className="theory-close-btn" onClick={handleClose}>
+                                <IonIcon icon={closeOutline}/>
+                            </button>
+                        </div>
 
-                <IonContent className="ion-padding">
-                    <div style={{textAlign: 'center', marginTop: '72px'}}>
-                        <h2 style={{margin: 0, color: '#334155'}}>{t('correct_answers')}</h2>
+                        <h1 className="theory-result-header-title">{t('result')}</h1>
 
-                        <p style={{fontSize: '36px', fontWeight: 800, color: '#0ea5e9', margin: '8px 0 0'}}>
-                            {score} / {questions.length}
-                        </p>
+                        <div className="theory-result-card">
+                            <h2 className={`theory-result-status is-${resultPresentation.tone}`}>{resultPresentation.text}</h2>
+                            <p className="theory-result-analysis">{examResultAnalysis}</p>
 
-                        {!isTheoryMode && (
-                            <>
-                                <p style={{
-                                    marginTop: '14px',
-                                    fontWeight: 700,
-                                    color: isPassed ? '#10b981' : '#ef4444'
-                                }}>
-                                    {isPassed ? t('exam_passed') : t('exam_failed')}
-                                </p>
+                            <div className="theory-result-illustration-box">
+                                <img src={resultPresentation.image} alt="result" className="theory-result-illustration"/>
+                            </div>
 
-                                {examTimedOut && (
-                                    <p style={{marginTop: '10px', fontWeight: 700, color: '#ef4444'}}>
-                                        Ժամանակը ավարտվել է
-                                    </p>
-                                )}
+                            <div className="theory-result-meta-row">
+                                <div className="theory-result-meta-item">
+                                    <IonIcon icon={checkmarkCircleOutline}/>
+                                    <span>
+                                        {score} / {questions.length} հարց
+                                    </span>
+                                </div>
 
-                                <p style={{marginTop: '10px', color: '#64748b', fontWeight: 600}}>
-                                    Ժամանակ՝ {formattedResultDuration}
-                                </p>
-                            </>
-                        )}
+                                <div className="theory-result-meta-item">
+                                    <IonIcon icon={timeOutline}/>
+                                    <span>{formattedResultDuration}</span>
+                                </div>
+                            </div>
+                        </div>
 
                         <IonButton
                             expand="block"
                             fill="clear"
                             className="theory-flat-action-btn"
                             onClick={openExamAnswers}
-                            style={{marginTop: '18px'}}
                         >
                             <IonIcon slot="start" icon={documentTextOutline}/>
                             Իմ պատասխանները
                         </IonButton>
 
-                        <IonButton expand="block" routerLink={backHref} style={{marginTop: '12px'}}>
+                        <IonButton expand="block" className="theory-share-btn" onClick={() => history.replace('/tests')}>
                             {t('finish')}
                         </IonButton>
                     </div>
@@ -758,15 +868,19 @@ const TestDetail: React.FC = () => {
                 isOpen={showExitConfirm}
                 header={t('stop_training_title')}
                 message={t('stop_training_message')}
+                cssClass="app-alert"
+                backdropDismiss={false}
                 buttons={[
                     {
                         text: t('no'),
                         role: 'cancel',
+                        cssClass: 'app-alert-cancel',
                         handler: handleExitCancel,
                     },
                     {
                         text: t('yes'),
                         role: 'destructive',
+                        cssClass: 'app-alert-danger',
                         handler: handleExitConfirm,
                     },
                 ]}

@@ -1,9 +1,12 @@
 import { Redirect, Route, useLocation } from 'react-router-dom';
 import {
   IonApp,
+  IonContent,
   IonIcon,
   IonLabel,
+  IonPage,
   IonRouterOutlet,
+  IonSpinner,
   IonTabBar,
   IonTabButton,
   IonTabs,
@@ -12,18 +15,8 @@ import {
 import { IonReactRouter } from '@ionic/react-router';
 import { personOutline, clipboardOutline, bookOutline, warningOutline } from 'ionicons/icons';
 import Home from './pages/Home';
-import Signs from './pages/Signs';
-import Rules from './pages/Rules';
-import Tests from './pages/Tests';
-import Settings from './pages/Settings';
-import TestDetail from './pages/TestDetail';
-import Exam from './pages/Exam';
-import WrongQuestions from './pages/WrongQuestions';
-import TheoryTests from './pages/TheoryTests';
-import SmartTraining from './pages/SmartTraining';
-import Favorites from './pages/Favorites';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import React, { useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { dbService } from './services/DatabaseService';
 
 /* Core CSS */
@@ -42,6 +35,32 @@ import './App.css';
 
 setupIonicReact();
 const USE_DRIVEGO_PREVIEW_COLORS = true; // rollback: set to false
+const TestsPage = lazy(() => import('./pages/Tests'));
+const RulesPage = lazy(() => import('./pages/Rules'));
+const SignsPage = lazy(() => import('./pages/Signs'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const FavoritesPage = lazy(() => import('./pages/Favorites'));
+const SmartTrainingPage = lazy(() => import('./pages/SmartTraining'));
+const WrongQuestionsPage = lazy(() => import('./pages/WrongQuestions'));
+const ExamPage = lazy(() => import('./pages/Exam'));
+const TheoryTestsPage = lazy(() => import('./pages/TheoryTests'));
+const TestDetailPage = lazy(() => import('./pages/TestDetail'));
+
+const RouteLoader: React.FC = () => (
+  <IonPage>
+    <IonContent className="ion-padding">
+      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '48px' }}>
+        <IonSpinner name="crescent" color="primary" />
+      </div>
+    </IonContent>
+  </IonPage>
+);
+
+const withRouteSuspense = (node: React.ReactNode) => (
+  <Suspense fallback={<RouteLoader />}>
+    {node}
+  </Suspense>
+);
 
 const AppContent: React.FC = () => {
   const { t } = useLanguage();
@@ -59,17 +78,17 @@ const AppContent: React.FC = () => {
     <IonTabs>
       <IonRouterOutlet>
         <Route exact path="/home"><Home /></Route>
-        <Route exact path="/tests"><Tests /></Route>
-        <Route exact path="/tests/:id"><TestDetail /></Route>
-        <Route exact path="/theory-tests"><TheoryTests /></Route>
-        <Route exact path="/theory-tests/:id"><TestDetail /></Route>
-        <Route exact path="/smart-training"><SmartTraining /></Route>
-        <Route exact path="/favorites"><Favorites /></Route>
-        <Route exact path="/exam"><Exam /></Route>
-        <Route exact path="/errors"><WrongQuestions /></Route>
-        <Route exact path="/rules"><Rules /></Route>
-        <Route exact path="/signs"><Signs /></Route>
-        <Route exact path="/settings"><Settings /></Route>
+        <Route exact path="/tests">{withRouteSuspense(<TestsPage />)}</Route>
+        <Route exact path="/tests/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
+        <Route exact path="/theory-tests">{withRouteSuspense(<TheoryTestsPage />)}</Route>
+        <Route exact path="/theory-tests/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
+        <Route exact path="/smart-training">{withRouteSuspense(<SmartTrainingPage />)}</Route>
+        <Route exact path="/favorites">{withRouteSuspense(<FavoritesPage />)}</Route>
+        <Route exact path="/exam">{withRouteSuspense(<ExamPage />)}</Route>
+        <Route exact path="/errors">{withRouteSuspense(<WrongQuestionsPage />)}</Route>
+        <Route exact path="/rules">{withRouteSuspense(<RulesPage />)}</Route>
+        <Route exact path="/signs">{withRouteSuspense(<SignsPage />)}</Route>
+        <Route exact path="/settings">{withRouteSuspense(<SettingsPage />)}</Route>
         <Route exact path="/profile"><Redirect to="/settings" /></Route>
         <Route exact path="/"><Redirect to="/home" /></Route>
       </IonRouterOutlet>

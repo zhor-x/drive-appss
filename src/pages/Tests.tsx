@@ -11,7 +11,8 @@ import { useIonViewWillEnter } from '@ionic/react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
-import { dbService, ExamTestItem } from '../services/DatabaseService';
+import { dbService, ExamTestItem, LatestExamResultItem } from '../services/DatabaseService';
+import { getResultPresentation } from '../utils/resultPresentation';
 import './Tests.css';
 
 const EXAM_SCORE_TOTAL = 20;
@@ -20,6 +21,7 @@ const Tests: React.FC = () => {
   const history = useHistory();
   const { langId, t } = useLanguage();
   const [items, setItems] = useState<ExamTestItem[]>([]);
+  const [lastResult, setLastResult] = useState<LatestExamResultItem | null>(null);
   const [loading, setLoading] = useState(true);
   const loadInFlightRef = useRef(false);
 
@@ -31,8 +33,12 @@ const Tests: React.FC = () => {
     loadInFlightRef.current = true;
     setLoading(true);
     try {
-      const data = await dbService.getExamTests(langId);
-      setItems(data);
+      const [testsData, latestResult] = await Promise.all([
+        dbService.getExamTests(langId),
+        dbService.getLatestCompletedExamResult(langId),
+      ]);
+      setItems(testsData);
+      setLastResult(latestResult);
     } catch (err) {
       console.error('Failed to load exam tests', err);
     } finally {
@@ -60,6 +66,18 @@ const Tests: React.FC = () => {
     [items],
   );
 
+  const lastResultPresentation = useMemo(() => {
+    if (!lastResult) {
+      return null;
+    }
+
+    const total = lastResult.total_questions > 0 ? lastResult.total_questions : EXAM_SCORE_TOTAL;
+    return {
+      ...getResultPresentation(lastResult.correct_answers, total),
+      total,
+    };
+  }, [lastResult]);
+
   return (
     <IonPage className="tests-page">
       <IonHeader translucent className="tests-header ion-no-border">
@@ -83,6 +101,31 @@ const Tests: React.FC = () => {
           </div>
         ) : (
           <div className="tests-grid-wrap">
+            {lastResult && lastResultPresentation && (
+              <div className="tests-last-result-card">
+                <div className="tests-last-result-copy">
+                  <div className="tests-last-result-eyebrow">Վերջին արդյունքը</div>
+                  <h2 className={`tests-last-result-title is-${lastResultPresentation.tone}`}>
+                    {lastResultPresentation.text}
+                  </h2>
+                  <p className="tests-last-result-subtitle">
+                    {lastResult.title || `${t('category_test')} ${lastResult.test_id}`}
+                  </p>
+                  <div className="tests-last-result-score">
+                    {lastResult.correct_answers} / {lastResultPresentation.total}
+                  </div>
+                </div>
+
+                <div className="tests-last-result-image-wrap">
+                  <img
+                    src={lastResultPresentation.image}
+                    alt="last result"
+                    className="tests-last-result-image"
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="tests-grid">
               {normalized.map((test) => (
                 <button

@@ -33,7 +33,7 @@
 
 .home-title-lg {
   color: var(--app-text-main) !important;
-  font-size: 32px !important;
+  font-size: clamp(24px, 7vw, 30px) !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em;
 }
@@ -48,9 +48,9 @@
 }
 
 .hero-settings-icon {
-  width: 26px;
-  height: 26px;
-  font-size: 26px;
+  width: 24px;
+  height: 24px;
+  font-size: 24px;
 }
 
 .home-container {
@@ -184,15 +184,15 @@
 }
 
 .quick-action-icon {
-  width: 34px;
-  height: 34px;
-  font-size: 34px;
+  width: clamp(26px, 8vw, 32px);
+  height: clamp(26px, 8vw, 32px);
+  font-size: clamp(26px, 8vw, 32px);
   color: white;
 }
 
 .quick-action-value {
   color: white;
-  font-size: 34px;
+  font-size: clamp(26px, 8vw, 32px);
   font-weight: 700;
   line-height: 1;
 }
@@ -225,9 +225,9 @@
 }
 
 .home-link-icon {
-  width: 34px;
-  height: 34px;
-  font-size: 34px;
+  width: clamp(26px, 8vw, 32px);
+  height: clamp(26px, 8vw, 32px);
+  font-size: clamp(26px, 8vw, 32px);
   margin-bottom: 10px;
 }
 

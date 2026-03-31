@@ -49,29 +49,52 @@
   --ion-color-secondary-tint: #9a655e;
 }
 
+body{
+  background: white;
+}
 .main-tab-bar {
   border: 1px solid #e5ece8;
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 3px 14px rgba(17, 40, 27, 0.04);
-  height: calc(72px + var(--ion-safe-area-bottom));
+  height: 60px;
+  width: calc(100% - 32px);
+  max-width: 420px;
   padding-bottom: var(--ion-safe-area-bottom);
+  padding-inline: 2px;
+  margin: 0 auto;
+  position: relative;
+  bottom: 14px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .main-tab-btn {
   --color: #8d938e;
   --color-selected: var(--app-accent);
-  font-size: 11px;
+  --padding-start: 4px;
+  --padding-end: 4px;
+  font-size: 9px;
   font-weight: 500;
+  background: #ffffff;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  max-height: 54px;
+  height: 54px;
 }
 
+
+.button {
+  color: var(--app-text-main);
+}
 .main-tab-btn ion-icon {
-  font-size: 30px;
-  margin-bottom: 4px;
+  font-size: clamp(20px, 5.8vw, 24px);
+  margin-bottom: 2px;
 }
 
 .main-tab-btn ion-label {
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 500;
   letter-spacing: -0.01em;
 }
@@ -82,14 +105,6 @@ ion-progress-bar {
   --buffer-background: var(--app-progress-bg);
 }
 
-
-ion-tab-bar {
-  bottom: 20px;
-  position: relative;
-  border-radius: 16px;
-  width: 92%;
-  margin: 0 auto;
-}
 
 ion-tab-button {
   --color: var(--ion-color-medium);
@@ -109,6 +124,79 @@ ion-tab-button {
   }
 }
 
-.inner-scroll{
-  margin-bottom: 20px;
+ion-content {
+  --background: #ffffff;
+  --padding-bottom: 20px;
+
+}
+
+.app-alert {
+  --backdrop-opacity: 0.42;
+  --width: min(360px, calc(100% - 24px));
+  --max-width: 360px;
+  --border-radius: 24px;
+
+}
+
+.app-alert .alert-wrapper {
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff 0%, #f6faf7 100%);
+  box-shadow: 0 20px 44px rgba(18, 42, 28, 0.18);
+  padding: 8px 0 4px;
+}
+
+.app-alert .alert-head {
+  padding-bottom: 6px;
+}
+
+.app-alert .alert-title {
+  color: #203a29;
+  font-size: clamp(20px, 5vw, 24px);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.app-alert .alert-message {
+  color: var(--app-text-muted);
+  font-size: clamp(14px, 3.9vw, 16px);
+  line-height: 1.55;
+  padding: 0 22px 10px;
+}
+
+.app-alert .alert-button-group {
+  gap: 10px;
+  padding: 12px 18px 18px;
+}
+
+.app-alert .alert-button {
+  min-height: 46px;
+  margin: 0;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: none;
+  flex: 1 1 0;
+
+}
+.app-alert .alert-button span{
+  justify-content: center;
+}
+.app-alert .alert-button.app-alert-cancel {
+  background: #eef2f6;
+  color: #475569;
+}
+
+.app-alert .alert-button.app-alert-danger {
+  background: linear-gradient(135deg, #ef5b5b 0%, #df3f62 100%);
+  color: #ffffff;
+}
+
+@media (max-width: 420px) {
+  .main-tab-bar {
+    border-radius: 14px;
+    max-width: calc(100% - 12px);
+    width: calc(100% - 24px);
+    padding-inline: 1px;
+  }
 }

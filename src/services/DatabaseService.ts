@@ -42,6 +42,15 @@ export interface ExamTestItem {
   max_wrong_answers: number;
 }
 
+export interface LatestExamResultItem {
+  id: number;
+  test_id: number;
+  title: string;
+  correct_answers: number;
+  total_questions: number;
+  finish_time: number;
+}
+
 export interface TheoryTopicItem {
   description: string;
   id: number;
@@ -1453,29 +1462,53 @@ class DatabaseService {
     }
   }
 
-  private async loadAnswersForQuestion(questionId: number, langId: number): Promise<AnswerOption[]> {
+  private async loadAnswersForQuestions(questionIds: number[], langId: number): Promise<Map<number, AnswerOption[]>> {
+    const uniqueQuestionIds = Array.from(
+      new Set(
+        questionIds
+          .map((id) => this.toInt(id, 0))
+          .filter((id) => id > 0),
+      ),
+    );
+
+    const answersByQuestionId = new Map<number, AnswerOption[]>();
+    if (uniqueQuestionIds.length === 0) {
+      return answersByQuestionId;
+    }
+
     const db = await this.ensureDb();
     const resolvedLangId = await this.resolveLanguageIdForTable('answer_translations', langId);
+    const placeholders = uniqueQuestionIds.map(() => '?').join(', ');
 
     const res = await db.query(
       `SELECT
+          CAST(a.question_id AS INTEGER) as question_id,
           CAST(a.id AS INTEGER) as id,
           CAST(a.is_right AS INTEGER) as is_right,
           at.title as title
        FROM answers a
-       JOIN answer_translations at ON CAST(a.id AS TEXT) = CAST(at.answer_id AS TEXT)
-       WHERE CAST(a.question_id AS TEXT) = ?
+       JOIN answer_translations at
+         ON CAST(a.id AS TEXT) = CAST(at.answer_id AS TEXT)
+       WHERE CAST(a.question_id AS TEXT) IN (${placeholders})
          AND CAST(at.language_id AS TEXT) = ?
-       ORDER BY CAST(a.id AS INTEGER)`,
-      [String(questionId), resolvedLangId],
+       ORDER BY CAST(a.question_id AS INTEGER), CAST(a.id AS INTEGER)`,
+      [...uniqueQuestionIds.map(String), resolvedLangId],
     );
 
-    const rows = res.values ?? [];
-    return rows.map((row: DbRow) => ({
-      id: this.toInt(row.id),
-      is_right: this.toBool(row.is_right),
-      title: String(row.title ?? ''),
-    }));
+    for (const row of res.values ?? []) {
+      const questionId = this.toInt(row.question_id, 0);
+      if (!answersByQuestionId.has(questionId)) {
+        answersByQuestionId.set(questionId, []);
+      }
+
+      answersByQuestionId.get(questionId)!.push({
+        id: this.toInt(row.id),
+        is_right: this.toBool(row.is_right),
+        title: String(row.title ?? ''),
+      });
+    }
+
+    return answersByQuestionId;
   }
 
   private async loadQuestionsByIds(questionIds: number[], langId: number): Promise<QuestionItem[]> {
@@ -1504,19 +1537,19 @@ class DatabaseService {
     for (const row of rows) {
       byId.set(this.toInt(row.id), row);
     }
+    const answersByQuestionId = await this.loadAnswersForQuestions(questionIds, langId);
 
     const output: QuestionItem[] = [];
     for (const qId of questionIds) {
       const row = byId.get(qId);
       if (!row) continue;
 
-      const answers = await this.loadAnswersForQuestion(qId, langId);
       output.push({
         id: qId,
         image: row.image ? String(row.image) : null,
         group_id: row.group_id !== null && row.group_id !== undefined ? this.toInt(row.group_id, 0) : null,
         title: String(row.title ?? ''),
-        answers,
+        answers: answersByQuestionId.get(qId) ?? [],
       });
     }
 
@@ -1836,22 +1869,23 @@ class DatabaseService {
     const resolvedLangId = await this.resolveLanguageIdForTable('test_translations', langId);
 
     const res = await db.query(
-      `WITH latest_completed_sessions AS (
+      `WITH latest_completed_scores AS (
           SELECT
-            CAST(test_id AS INTEGER) as test_id,
-            MAX(CAST(id AS INTEGER)) as user_exam_test_id
-          FROM user_exam_tests
-          WHERE CAST(user_id AS TEXT) = ?
-            AND CAST(COALESCE(is_completed, '0') AS INTEGER) = 1
-          GROUP BY CAST(test_id AS INTEGER)
-        ),
-        latest_completed_scores AS (
-          SELECT
-            lcs.test_id as test_id,
+            CAST(uet.test_id AS INTEGER) as test_id,
             CAST(COALESCE(uet.correct_answers, '0') AS INTEGER) as solved_count
-          FROM latest_completed_sessions lcs
-          JOIN user_exam_tests uet
-            ON CAST(uet.id AS INTEGER) = lcs.user_exam_test_id
+          FROM user_exam_tests uet
+          WHERE CAST(uet.user_id AS TEXT) = ?
+            AND CAST(COALESCE(uet.is_completed, '0') AS INTEGER) = 1
+            AND CAST(uet.id AS INTEGER) = (
+              SELECT CAST(inner_uet.id AS INTEGER)
+              FROM user_exam_tests inner_uet
+              WHERE CAST(inner_uet.user_id AS TEXT) = ?
+                AND CAST(COALESCE(inner_uet.is_completed, '0') AS INTEGER) = 1
+                AND CAST(inner_uet.test_id AS TEXT) = CAST(uet.test_id AS TEXT)
+              ORDER BY COALESCE(NULLIF(inner_uet.updated_at, ''), inner_uet.created_at, '') DESC,
+                       CAST(inner_uet.id AS INTEGER) DESC
+              LIMIT 1
+            )
         )
        SELECT
           CAST(t.id AS INTEGER) as id,
@@ -1872,7 +1906,7 @@ class DatabaseService {
          ON CAST(lcs.test_id AS TEXT) = CAST(t.id AS TEXT)
        WHERE t.deleted_at IS NULL OR CAST(t.deleted_at AS TEXT) = ''
        ORDER BY CAST(t.id AS INTEGER)`,
-      [APP_USER_ID, resolvedLangId],
+      [APP_USER_ID, APP_USER_ID, resolvedLangId],
     );
 
     return (res.values ?? []).map((row: DbRow) => {
@@ -1886,6 +1920,46 @@ class DatabaseService {
         max_wrong_answers: this.toInt(row.max_wrong_answers, 0),
       };
     });
+  }
+
+  async getLatestCompletedExamResult(langId: number): Promise<LatestExamResultItem | null> {
+    const db = await this.ensureDb();
+    const resolvedLangId = await this.resolveLanguageIdForTable('test_translations', langId);
+
+    const res = await db.query(
+      `SELECT
+          CAST(uet.id AS INTEGER) as id,
+          CAST(uet.test_id AS INTEGER) as test_id,
+          CAST(COALESCE(uet.correct_answers, 0) AS INTEGER) as correct_answers,
+          CAST(COALESCE(uet.total_questions, 0) AS INTEGER) as total_questions,
+          CAST(COALESCE(uet.finish_time, 0) AS INTEGER) as finish_time,
+          tt.title as title
+       FROM user_exam_tests uet
+       LEFT JOIN test_translations tt
+         ON CAST(tt.test_id AS TEXT) = CAST(uet.test_id AS TEXT)
+        AND CAST(tt.language_id AS TEXT) = ?
+       WHERE CAST(uet.user_id AS TEXT) = ?
+         AND CAST(COALESCE(uet.is_completed, '0') AS INTEGER) = 1
+       ORDER BY CAST(uet.id AS INTEGER) DESC
+       LIMIT 1`,
+      [resolvedLangId, APP_USER_ID],
+    );
+
+    const row = res.values?.[0];
+    if (!row) {
+      return null;
+    }
+
+    const testId = this.toInt(row.test_id, 0);
+
+    return {
+      id: this.toInt(row.id, 0),
+      test_id: testId,
+      title: String(row.title ?? `Թեստ ${testId}`),
+      correct_answers: this.toInt(row.correct_answers, 0),
+      total_questions: this.toInt(row.total_questions, DEFAULT_EXAM_QUESTION_LIMIT),
+      finish_time: this.toInt(row.finish_time, 0),
+    };
   }
 
   async getTheoryTopics(langId: number): Promise<TheoryTopicItem[]> {

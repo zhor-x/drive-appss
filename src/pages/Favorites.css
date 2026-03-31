@@ -33,7 +33,7 @@
 
 .favorites-title-lg {
   color: var(--app-text-main) !important;
-  font-size: 32px !important;
+  font-size: clamp(24px, 7vw, 30px) !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em;
 }
@@ -257,6 +257,8 @@
   letter-spacing: 0;
   font-size: 14px;
   font-weight: 700;
+  color: white;
+  --color: white;
 }
 
 .favorites-preview-modal::part(content) {

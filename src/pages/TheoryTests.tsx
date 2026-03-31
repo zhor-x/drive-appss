@@ -13,13 +13,20 @@ import {
   IonTitle,
   IonToolbar,
 } from '@ionic/react';
-import { useIonViewWillEnter } from '@ionic/react';
-import { chevronBackOutline, chevronForwardOutline } from 'ionicons/icons';
+import { useIonViewDidEnter, useIonViewWillEnter, useIonViewWillLeave } from '@ionic/react';
+import { Capacitor } from '@capacitor/core';
+import { chevronBackOutline } from 'ionicons/icons';
 import React, { useCallback, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
 import { dbService, TheoryTopicItem } from '../services/DatabaseService';
 import './TheoryTests.css';
+
+type IonBackButtonEvent = CustomEvent<{
+  register: (priority: number, handler: () => void | Promise<void>) => void;
+}>;
+
+const HARDWARE_BACK_PRIORITY = 1000;
 
 const TheoryTests: React.FC = () => {
   const history = useHistory();
@@ -27,6 +34,7 @@ const TheoryTests: React.FC = () => {
   const [items, setItems] = useState<TheoryTopicItem[]>([]);
   const [loading, setLoading] = useState(true);
   const loadInFlightRef = useRef(false);
+  const backButtonListenerRef = useRef<((event: IonBackButtonEvent) => void) | null>(null);
 
   const load = useCallback(async () => {
     if (loadInFlightRef.current) {
@@ -50,10 +58,40 @@ const TheoryTests: React.FC = () => {
     load();
   });
 
+  const attachBackButtonListener = useCallback(() => {
+    if (Capacitor.getPlatform() !== 'android' || backButtonListenerRef.current || typeof document === 'undefined') {
+      return;
+    }
+
+    const listener = (event: IonBackButtonEvent) => {
+      event.detail.register(HARDWARE_BACK_PRIORITY, () => {
+        history.replace('/home');
+      });
+    };
+
+    document.addEventListener('ionBackButton', listener as EventListener);
+    backButtonListenerRef.current = listener;
+  }, [history]);
+
+  const detachBackButtonListener = useCallback(() => {
+    if (!backButtonListenerRef.current || typeof document === 'undefined') {
+      return;
+    }
+
+    document.removeEventListener('ionBackButton', backButtonListenerRef.current as EventListener);
+    backButtonListenerRef.current = null;
+  }, []);
+
+  useIonViewDidEnter(() => {
+    attachBackButtonListener();
+  });
+
+  useIonViewWillLeave(() => {
+    detachBackButtonListener();
+  });
+
   const handleBack = () => {
     history.replace('/home');
-
-
   };
 
   return (

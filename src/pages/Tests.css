@@ -33,7 +33,7 @@
 
 .tests-title-lg {
   color: var(--app-text-main) !important;
-  font-size: 32px !important;
+  font-size: clamp(24px, 7vw, 30px) !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em;
 }
@@ -50,6 +50,85 @@
 
 .tests-grid-wrap {
   padding: 2px 16px calc(20px + var(--ion-safe-area-bottom));
+}
+
+.tests-last-result-card {
+  width: 100%;
+  border: 1px solid #e5ece8;
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(17, 40, 27, 0.06);
+  padding: 14px;
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 12px;
+  text-align: left;
+}
+
+.tests-last-result-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.tests-last-result-eyebrow {
+  color: var(--app-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tests-last-result-title {
+  margin: 8px 0 6px;
+  color: var(--app-text-main);
+  font-size: clamp(20px, 6vw, 28px);
+  line-height: 1.15;
+  font-weight: 800;
+}
+
+.tests-last-result-title.is-good {
+  color: var(--app-success);
+}
+
+.tests-last-result-title.is-mid {
+  color: var(--app-accent);
+}
+
+.tests-last-result-title.is-bad {
+  color: var(--app-danger);
+}
+
+.tests-last-result-subtitle {
+  margin: 0;
+  color: var(--app-text-main);
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.tests-last-result-score {
+  margin-top: 10px;
+  color: var(--app-text-main);
+  font-size: clamp(18px, 5.5vw, 24px);
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.tests-last-result-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tests-last-result-image {
+  width: 100%;
+  max-width: 112px;
+  max-height: 112px;
+  object-fit: contain;
 }
 
 .tests-grid {
@@ -82,7 +161,7 @@
 .test-ticket-score {
   margin-top: 18px;
   color: var(--app-text-main);
-  font-size: 27px;
+  font-size: clamp(22px, 6.5vw, 27px);
   line-height: 1.1;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -107,6 +186,15 @@
 }
 
 @media (max-width: 360px) {
+  .tests-last-result-card {
+    grid-template-columns: 1fr;
+  }
+
+  .tests-last-result-image {
+    max-width: 92px;
+    max-height: 92px;
+  }
+
   .tests-grid {
     grid-template-columns: 1fr;
   }
