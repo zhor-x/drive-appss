@@ -25,14 +25,26 @@ import {
 } from 'ionicons/icons';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useHistory, useLocation, useParams} from 'react-router-dom';
+import badImage from '../assets/images/bad.jpg';
+import goodImage from '../assets/images/good.jpg';
+import lilBadImage from '../assets/images/lil-bad.jpg';
+import notBadImage from '../assets/images/not-bad.jpg';
 import {useLanguage} from '../context/LanguageContext';
 import {dbService, QuestionItem} from '../services/DatabaseService';
-import {getResultPresentation, getWrongAnswerAnalysis} from '../utils/resultPresentation';
 import './TestDetail.css';
 
 type AnswerState = {
     answerId: number;
     isRight: boolean;
+};
+
+type ResultTone = 'good' | 'mid' | 'bad';
+
+type ResultPresentation = {
+    image: string;
+    percent: number;
+    text: string;
+    tone: ResultTone;
 };
 
 type CommitAnswerResult = {
@@ -46,6 +58,40 @@ type IonBackButtonEvent = CustomEvent<{
 
 const countCorrectAnswers = (answersMap: Record<number, AnswerState>) =>
     Object.values(answersMap).filter((answer) => answer.isRight).length;
+
+const getResultPresentation = (score: number, total: number): ResultPresentation => {
+    const safeScore = Math.max(score, 0);
+    const safeTotal = Math.max(total, 1);
+    const percent = Math.round((safeScore / safeTotal) * 100);
+
+    if (percent >= 85) {
+        return {text: 'Գերազանց արդյունք', tone: 'good', image: goodImage, percent};
+    }
+    if (percent >= 65) {
+        return {text: 'Լավ արդյունք', tone: 'good', image: notBadImage, percent};
+    }
+    if (percent >= 45) {
+        return {text: 'Վատ չէ, բայց դեռ աշխատելու տեղ կա', tone: 'mid', image: lilBadImage, percent};
+    }
+
+    return {text: 'Կա աշխատելու տեղ', tone: 'bad', image: badImage, percent};
+};
+
+const getWrongAnswerAnalysis = (wrongCount: number): string => {
+    if (wrongCount === 0) {
+        return 'Սխալներ չկան';
+    }
+
+    if (wrongCount <= 2) {
+        return 'Սխալ՝ անուշադրությունից';
+    }
+
+    if (wrongCount <= 5) {
+        return 'Կան անուշադրության սխալներ';
+    }
+
+    return 'Պետք է կրկնել թեման';
+};
 
 const questionImageLoaders = import.meta.glob('../assets/images/questions/**/*', {
     import: 'default',

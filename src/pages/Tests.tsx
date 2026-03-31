@@ -10,12 +10,42 @@ import {
 import { useIonViewWillEnter } from '@ionic/react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
+import badImage from '../assets/images/bad.jpg';
+import goodImage from '../assets/images/good.jpg';
+import lilBadImage from '../assets/images/lil-bad.jpg';
+import notBadImage from '../assets/images/not-bad.jpg';
 import { useLanguage } from '../context/LanguageContext';
 import { dbService, ExamTestItem, LatestExamResultItem } from '../services/DatabaseService';
-import { getResultPresentation } from '../utils/resultPresentation';
 import './Tests.css';
 
 const EXAM_SCORE_TOTAL = 20;
+
+type ResultTone = 'good' | 'mid' | 'bad';
+
+type ResultPresentation = {
+  image: string;
+  percent: number;
+  text: string;
+  tone: ResultTone;
+};
+
+const getResultPresentation = (score: number, total: number): ResultPresentation => {
+  const safeScore = Math.max(score, 0);
+  const safeTotal = Math.max(total, 1);
+  const percent = Math.round((safeScore / safeTotal) * 100);
+
+  if (percent >= 85) {
+    return { text: 'Գերազանց արդյունք', tone: 'good', image: goodImage, percent };
+  }
+  if (percent >= 65) {
+    return { text: 'Լավ արդյունք', tone: 'good', image: notBadImage, percent };
+  }
+  if (percent >= 45) {
+    return { text: 'Վատ չէ, բայց դեռ աշխատելու տեղ կա', tone: 'mid', image: lilBadImage, percent };
+  }
+
+  return { text: 'Կա աշխատելու տեղ', tone: 'bad', image: badImage, percent };
+};
 
 const Tests: React.FC = () => {
   const history = useHistory();
