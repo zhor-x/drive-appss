@@ -139,6 +139,13 @@
     font-weight: 700;
 }
 
+.theory-question-loader {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .theory-answer-list {
     display: grid;
     gap: 10px;

@@ -142,6 +142,9 @@ const loadLocalQuestionImage = async (imagePath?: string | null): Promise<string
 
 const EXAM_DURATION_SECONDS = 30 * 60;
 const HARDWARE_BACK_PRIORITY = 1000;
+const THEORY_INITIAL_QUESTION_BATCH = 1;
+const THEORY_NEARBY_QUESTION_BATCH = 3;
+const THEORY_BACKGROUND_QUESTION_BATCH = 12;
 
 const TestDetail: React.FC = () => {
     const {id} = useParams<{ id: string }>();
@@ -149,11 +152,21 @@ const TestDetail: React.FC = () => {
     const history = useHistory();
     const {langId, t} = useLanguage();
 
-    const testId = Number(id);
+    const routeId = decodeURIComponent(id);
+    const itemId = Number(routeId);
     const isTheoryMode = location.pathname.startsWith('/theory-tests/');
-    const backHref = isTheoryMode ? '/theory-tests' : '/tests';
+    const isSmartTrainingMode = location.pathname.startsWith('/smart-training/');
+    const isPracticeMode = isTheoryMode || isSmartTrainingMode;
+    const backHref = isTheoryMode
+        ? '/theory-tests'
+        : isSmartTrainingMode
+            ? '/smart-training'
+            : '/tests';
 
     const [questions, setQuestions] = useState<QuestionItem[]>([]);
+    const [theoryQuestionIds, setTheoryQuestionIds] = useState<number[]>([]);
+    const [theoryQuestionsById, setTheoryQuestionsById] = useState<Record<number, QuestionItem>>({});
+    const [practiceTitle, setPracticeTitle] = useState('');
     const [loading, setLoading] = useState(true);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answersByQuestionId, setAnswersByQuestionId] = useState<Record<number, AnswerState>>({});
@@ -175,6 +188,95 @@ const TestDetail: React.FC = () => {
     const scrollBodyRef = useRef<HTMLDivElement | null>(null);
     const backButtonListenerRef = useRef<((event: IonBackButtonEvent) => void) | null>(null);
     const hardwareBackHandlerRef = useRef<() => void>(() => {});
+    const examSessionIdRef = useRef<number | null>(null);
+    const theoryQuestionsByIdRef = useRef<Record<number, QuestionItem>>({});
+    const pendingTheoryQuestionIdsRef = useRef<Set<number>>(new Set());
+    const theoryLoadVersionRef = useRef(0);
+
+    const mergeTheoryQuestions = useCallback((loadedQuestions: QuestionItem[]) => {
+        if (loadedQuestions.length === 0) {
+            return;
+        }
+
+        setTheoryQuestionsById((prev) => {
+            let changed = false;
+            const next = {...prev};
+
+            for (const question of loadedQuestions) {
+                if (next[question.id] !== question) {
+                    next[question.id] = question;
+                    changed = true;
+                }
+            }
+
+            if (!changed) {
+                return prev;
+            }
+
+            theoryQuestionsByIdRef.current = next;
+            return next;
+        });
+    }, []);
+
+    const loadTheoryQuestionBatch = useCallback(async (questionIdsToLoad: number[], loadVersion: number) => {
+        const batchIds = questionIdsToLoad.filter(
+            (questionId) =>
+                questionId > 0
+                && !theoryQuestionsByIdRef.current[questionId]
+                && !pendingTheoryQuestionIdsRef.current.has(questionId),
+        );
+
+        if (batchIds.length === 0) {
+            return;
+        }
+
+        for (const questionId of batchIds) {
+            pendingTheoryQuestionIdsRef.current.add(questionId);
+        }
+
+        try {
+            const loadedQuestions = await dbService.getQuestionsByIds(batchIds, langId);
+            if (theoryLoadVersionRef.current !== loadVersion) {
+                return;
+            }
+
+            mergeTheoryQuestions(loadedQuestions);
+        } catch (err) {
+            if (theoryLoadVersionRef.current === loadVersion) {
+                console.error('Failed to load theory question batch', err);
+            }
+        } finally {
+            for (const questionId of batchIds) {
+                pendingTheoryQuestionIdsRef.current.delete(questionId);
+            }
+        }
+    }, [langId, mergeTheoryQuestions]);
+
+    const preloadTheoryQuestions = useCallback(async (questionIdsToLoad: number[], loadVersion: number) => {
+        for (let index = 0; index < questionIdsToLoad.length; index += THEORY_BACKGROUND_QUESTION_BATCH) {
+            if (theoryLoadVersionRef.current !== loadVersion) {
+                return;
+            }
+
+            await loadTheoryQuestionBatch(
+                questionIdsToLoad.slice(index, index + THEORY_BACKGROUND_QUESTION_BATCH),
+                loadVersion,
+            );
+
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+    }, [loadTheoryQuestionBatch]);
+
+    const ensureTheoryQuestionLoaded = useCallback((index: number) => {
+        const questionId = theoryQuestionIds[index];
+        if (!isPracticeMode || !questionId) {
+            return;
+        }
+
+        const loadVersion = theoryLoadVersionRef.current;
+        const nearbyQuestionIds = theoryQuestionIds.slice(index, index + THEORY_NEARBY_QUESTION_BATCH);
+        void loadTheoryQuestionBatch(nearbyQuestionIds, loadVersion);
+    }, [isPracticeMode, loadTheoryQuestionBatch, theoryQuestionIds]);
 
     useEffect(() => {
         let cancelled = false;
@@ -183,6 +285,10 @@ const TestDetail: React.FC = () => {
             setLoading(true);
             setShowResult(false);
             setCurrentIndex(0);
+            setQuestions([]);
+            setTheoryQuestionIds([]);
+            setTheoryQuestionsById({});
+            setPracticeTitle('');
             setAnswersByQuestionId({});
             setDraftAnswersByQuestionId({});
             setFavoriteQuestionIds({});
@@ -193,11 +299,72 @@ const TestDetail: React.FC = () => {
             setExamTimeLeftSec(EXAM_DURATION_SECONDS);
             setExamTimedOut(false);
             startedAtRef.current = Date.now();
+            examSessionIdRef.current = null;
+            theoryQuestionsByIdRef.current = {};
+            pendingTheoryQuestionIdsRef.current.clear();
+
+            const loadVersion = ++theoryLoadVersionRef.current;
 
             try {
-                const data = isTheoryMode
-                    ? await dbService.getQuestionsByGroup(testId, langId)
-                    : await dbService.getQuestionsByTest(testId, langId);
+                if (isPracticeMode) {
+                    const questionIds = isTheoryMode
+                        ? await dbService.getQuestionIdsByGroup(itemId)
+                        : await dbService.getSmartTrainingQuestionIds(routeId, langId);
+
+                    if (!cancelled) {
+                        if (isTheoryMode) {
+                            setPracticeTitle(`Թեմա ${itemId}`);
+                        } else {
+                            setPracticeTitle(dbService.getSmartTrainingFocusMeta(routeId, langId)?.title ?? t('smart_training'));
+                        }
+                    }
+
+                    if (cancelled || theoryLoadVersionRef.current !== loadVersion) {
+                        return;
+                    }
+
+                    setTheoryQuestionIds(questionIds);
+
+                    if (questionIds.length === 0) {
+                        setLoading(false);
+                        return;
+                    }
+
+                    void (async () => {
+                        try {
+                            const favoriteIds = await dbService.getFavoriteQuestionIds(questionIds);
+                            if (!cancelled && theoryLoadVersionRef.current === loadVersion) {
+                                const byId = favoriteIds.reduce<Record<number, boolean>>((acc, qId) => {
+                                    acc[qId] = true;
+                                    return acc;
+                                }, {});
+                                setFavoriteQuestionIds(byId);
+                            }
+                        } catch (err) {
+                            if (!cancelled && theoryLoadVersionRef.current === loadVersion) {
+                                console.error('Failed to load favorite questions', err);
+                            }
+                        }
+                    })();
+
+                    await loadTheoryQuestionBatch(
+                        questionIds.slice(0, THEORY_INITIAL_QUESTION_BATCH),
+                        loadVersion,
+                    );
+
+                    if (!cancelled && theoryLoadVersionRef.current === loadVersion) {
+                        setLoading(false);
+                    }
+
+                    void preloadTheoryQuestions(
+                        questionIds.slice(THEORY_INITIAL_QUESTION_BATCH),
+                        loadVersion,
+                    );
+
+                    return;
+                }
+
+                const data = await dbService.getQuestionsByTest(itemId, langId);
 
                 if (!cancelled) {
                     setQuestions(data);
@@ -207,6 +374,13 @@ const TestDetail: React.FC = () => {
                 const questionIds = data.map((q) => q.id);
                 if (questionIds.length === 0) {
                     return;
+                }
+
+                try {
+                    examSessionIdRef.current = await dbService.startExamTestSession(itemId);
+                } catch (err) {
+                    console.error('Failed to start exam session', err);
+                    examSessionIdRef.current = null;
                 }
 
                 const favoriteIds = await dbService.getFavoriteQuestionIds(questionIds);
@@ -235,7 +409,7 @@ const TestDetail: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [isTheoryMode, langId, testId]);
+    }, [isPracticeMode, isTheoryMode, itemId, langId, loadTheoryQuestionBatch, preloadTheoryQuestions, routeId, t]);
 
     useEffect(() => {
         const activeDot = document.getElementById(`theory-dot-${currentIndex}`);
@@ -246,7 +420,25 @@ const TestDetail: React.FC = () => {
         scrollBodyRef.current?.scrollTo({top: 0, behavior: 'smooth'});
     }, [currentIndex]);
 
-    const currentQuestion = questions[currentIndex];
+    const orderedQuestionIds = useMemo(
+        () => (isPracticeMode ? theoryQuestionIds : questions.map((question) => question.id)),
+        [isPracticeMode, questions, theoryQuestionIds],
+    );
+
+    const totalQuestions = orderedQuestionIds.length;
+    const currentQuestionId = orderedQuestionIds[currentIndex] ?? null;
+    const currentQuestion = currentQuestionId
+        ? (isPracticeMode ? theoryQuestionsById[currentQuestionId] ?? null : questions[currentIndex] ?? null)
+        : null;
+    const isCurrentQuestionLoading = isPracticeMode && !loading && totalQuestions > 0 && currentQuestionId !== null && !currentQuestion;
+
+    useEffect(() => {
+        if (!isPracticeMode || totalQuestions === 0) {
+            return;
+        }
+
+        ensureTheoryQuestionLoaded(currentIndex);
+    }, [currentIndex, ensureTheoryQuestionLoaded, isPracticeMode, totalQuestions]);
 
     useEffect(() => {
         let cancelled = false;
@@ -287,14 +479,14 @@ const TestDetail: React.FC = () => {
     );
 
     const passThreshold = useMemo(() => {
-        if (questions.length <= 0) return 0;
-        return Math.max(questions.length - 2, 1);
-    }, [questions.length]);
+        if (totalQuestions <= 0) return 0;
+        return Math.max(totalQuestions - 2, 1);
+    }, [totalQuestions]);
 
     const isPassed = score >= passThreshold;
-    const wrongCount = Math.max(questions.length - score, 0);
+    const wrongCount = Math.max(totalQuestions - score, 0);
 
-    const resultPresentation = useMemo(() => getResultPresentation(score, questions.length), [questions.length, score]);
+    const resultPresentation = useMemo(() => getResultPresentation(score, totalQuestions), [score, totalQuestions]);
     const theoryAnswerAnalysis = useMemo(() => getWrongAnswerAnalysis(wrongCount), [wrongCount]);
 
     const formattedResultDuration = useMemo(() => {
@@ -319,18 +511,37 @@ const TestDetail: React.FC = () => {
         return isPassed ? t('exam_passed') : t('exam_failed');
     }, [examTimedOut, isPassed, t]);
 
-    const shouldRevealAnswerFeedback = isTheoryMode ? isAnswered : examReviewMode;
-    const canGoNext = hasDraftSelection || isAnswered || (!isTheoryMode && examReviewMode);
+    const shouldRevealAnswerFeedback = isPracticeMode ? isAnswered : examReviewMode;
+    const canGoNext = hasDraftSelection || isAnswered || (!isPracticeMode && examReviewMode);
+
+    const detailTitle = useMemo(() => {
+        if (isSmartTrainingMode) {
+            return `${practiceTitle || t('smart_training')}: Հարց #${currentIndex + 1}`;
+        }
+
+        if (isTheoryMode) {
+            return `Թեմա ${itemId}: Հարց #${currentIndex + 1}`;
+        }
+
+        return `Թեստ ${itemId}: Հարց #${currentIndex + 1}`;
+    }, [currentIndex, isSmartTrainingMode, isTheoryMode, itemId, practiceTitle, t]);
 
     const goToQuestion = (index: number) => {
-        if (index < 0 || index >= questions.length) return;
+        if (index < 0 || index >= totalQuestions) return;
         setCurrentIndex(index);
+        if (isPracticeMode) {
+            ensureTheoryQuestionLoaded(index);
+        }
     };
 
     const handleAnswer = (answerId: number) => {
         if (!currentQuestion) return;
 
         const questionId = currentQuestion.id;
+        if (isPracticeMode && answersByQuestionId[questionId]) {
+            return;
+        }
+
         const committedAnswerId = answersByQuestionId[questionId]?.answerId ?? null;
 
         setDraftAnswersByQuestionId((prev) => {
@@ -357,6 +568,21 @@ const TestDetail: React.FC = () => {
         const questionId = currentQuestion.id;
         const committedAnswer = answersByQuestionId[questionId];
         const draftAnswerId = draftAnswersByQuestionId[questionId];
+
+        if (isPracticeMode && committedAnswer) {
+            if (draftAnswerId !== undefined) {
+                setDraftAnswersByQuestionId((prev) => {
+                    const next = {...prev};
+                    delete next[questionId];
+                    return next;
+                });
+            }
+
+            return {
+                committed: true,
+                answersSnapshot: answersByQuestionId,
+            };
+        }
 
         if (committedAnswer && (draftAnswerId === undefined || draftAnswerId === committedAnswer.answerId)) {
             if (draftAnswerId === committedAnswer.answerId) {
@@ -405,8 +631,16 @@ const TestDetail: React.FC = () => {
         });
 
         try {
-            if (isTheoryMode) {
+            if (isPracticeMode) {
                 await dbService.saveUserAnswer(questionId, draftAnswerId, currentQuestion.group_id, isRight);
+            } else {
+                await dbService.saveExamTestAnswer(
+                    examSessionIdRef.current ?? 0,
+                    itemId,
+                    questionId,
+                    draftAnswerId,
+                    isRight,
+                );
             }
         } catch (err) {
             console.error('Failed to save answer', err);
@@ -419,21 +653,27 @@ const TestDetail: React.FC = () => {
     };
 
     const finalizeExamIfNeeded = async (elapsedSeconds: number, correctAnswersCount: number) => {
-        if (isTheoryMode || completionSavedRef.current) {
+        if (isPracticeMode || completionSavedRef.current) {
             return;
         }
 
         completionSavedRef.current = true;
 
         try {
-            await dbService.recordExamTestCompletion(testId, correctAnswersCount, questions.length, elapsedSeconds);
+            await dbService.completeExamTestSession(
+                examSessionIdRef.current,
+                itemId,
+                correctAnswersCount,
+                questions.length,
+                elapsedSeconds,
+            );
         } catch (err) {
             console.error('Failed to save exam completion', err);
         }
     };
 
     const finishExam = async (timedOut = false, answersSnapshot: Record<number, AnswerState> = answersByQuestionId) => {
-        if (isTheoryMode || examFinalizedRef.current) {
+        if (isPracticeMode || examFinalizedRef.current) {
             return;
         }
 
@@ -454,7 +694,7 @@ const TestDetail: React.FC = () => {
     };
 
     useEffect(() => {
-        if (isTheoryMode || loading || showResult || examReviewMode || questions.length === 0) {
+        if (isPracticeMode || loading || showResult || examReviewMode || questions.length === 0) {
             return;
         }
 
@@ -468,20 +708,20 @@ const TestDetail: React.FC = () => {
 
         const intervalId = window.setInterval(tick, 1000);
         return () => window.clearInterval(intervalId);
-    }, [examReviewMode, isTheoryMode, loading, questions.length, showResult]);
+    }, [examReviewMode, isPracticeMode, loading, questions.length, showResult]);
 
     useEffect(() => {
-        if (isTheoryMode || loading || showResult || examReviewMode || questions.length === 0) {
+        if (isPracticeMode || loading || showResult || examReviewMode || questions.length === 0) {
             return;
         }
 
         if (examTimeLeftSec <= 0) {
             void finishExam(true);
         }
-    }, [examReviewMode, examTimeLeftSec, isTheoryMode, loading, questions.length, showResult]);
+    }, [examReviewMode, examTimeLeftSec, isPracticeMode, loading, questions.length, showResult]);
 
     const handleNext = async () => {
-        if (!isTheoryMode && examReviewMode) {
+        if (!isPracticeMode && examReviewMode) {
             if (currentIndex < questions.length - 1) {
                 goToQuestion(currentIndex + 1);
             } else {
@@ -495,12 +735,12 @@ const TestDetail: React.FC = () => {
             return;
         }
 
-        if (currentIndex < questions.length - 1) {
+        if (currentIndex < totalQuestions - 1) {
             goToQuestion(currentIndex + 1);
             return;
         }
 
-        if (!isTheoryMode) {
+        if (!isPracticeMode) {
             await finishExam(false, answersSnapshot);
             return;
         }
@@ -510,8 +750,8 @@ const TestDetail: React.FC = () => {
     };
 
     const navigateBackFromDetail = () => {
-        if (isTheoryMode) {
-            history.replace('/theory-tests');
+        if (isPracticeMode) {
+            history.replace(backHref);
             return;
         }
 
@@ -598,7 +838,7 @@ const TestDetail: React.FC = () => {
     };
 
     const shareTheoryResult = async () => {
-        const text = `${resultPresentation.text}\n${score} / ${questions.length} հարց\nԺամանակ՝ ${formattedResultDuration}`;
+        const text = `${resultPresentation.text}\n${score} / ${totalQuestions} հարց\nԺամանակ՝ ${formattedResultDuration}`;
 
         try {
             if (navigator.share) {
@@ -667,7 +907,7 @@ const TestDetail: React.FC = () => {
         );
     }
 
-    if (!questions.length) {
+    if (!totalQuestions) {
         return (
             <IonPage>
                 <IonHeader className="ion-no-border">
@@ -675,7 +915,7 @@ const TestDetail: React.FC = () => {
                         <IonButtons slot="start">
                             <IonBackButton defaultHref={backHref}/>
                         </IonButtons>
-                        <IonTitle>{isTheoryMode ? t('theory_topics') : t('exam_tests')}</IonTitle>
+                        <IonTitle>{isPracticeMode ? (isSmartTrainingMode ? t('smart_training') : t('theory_topics')) : t('exam_tests')}</IonTitle>
                     </IonToolbar>
                 </IonHeader>
 
@@ -692,7 +932,7 @@ const TestDetail: React.FC = () => {
     }
 
     if (showResult) {
-        if (isTheoryMode) {
+        if (isPracticeMode) {
             return (
                 <IonPage className="theory-detail-page">
                     <IonContent fullscreen className="theory-detail-content">
@@ -717,7 +957,7 @@ const TestDetail: React.FC = () => {
                                     <div className="theory-result-meta-item">
                                         <IonIcon icon={checkmarkCircleOutline}/>
                                         <span>
-                      {score} / {questions.length} հարց
+                      {score} / {totalQuestions} հարց
                     </span>
                                     </div>
 
@@ -774,7 +1014,7 @@ const TestDetail: React.FC = () => {
                                 <div className="theory-result-meta-item">
                                     <IonIcon icon={checkmarkCircleOutline}/>
                                     <span>
-                                        {score} / {questions.length} հարց
+                                        {score} / {totalQuestions} հարց
                                     </span>
                                 </div>
 
@@ -815,13 +1055,9 @@ const TestDetail: React.FC = () => {
                             </button>
                         </div>
                         <div className='ion-flex ion-flex-row ion-justify-content-between ion-align-content-center'>
-                            <h1 className="theory-detail-title">
-                                {isTheoryMode
-                                    ? `Թեմա ${testId}: Հարց #${currentIndex + 1}`
-                                    : `Թեստ ${testId}: Հարց #${currentIndex + 1}`}
-                            </h1>
+                            <h1 className="theory-detail-title">{detailTitle}</h1>
 
-                            {!isTheoryMode && !examReviewMode && (
+                            {!isPracticeMode && !examReviewMode && (
                                 <div className={`theory-exam-timer${examTimeLeftSec <= 5 * 60 ? ' is-danger' : ''}`}>
                                     <IonIcon icon={timeOutline}/>
                                     <span>{formattedExamTimeLeft}</span>
@@ -829,13 +1065,13 @@ const TestDetail: React.FC = () => {
                             )}
                         </div>
                         <div className="theory-dots-row">
-                            {questions.map((question, index) => {
-                                const answered = Boolean(answersByQuestionId[question.id]);
-                                const isRight = answersByQuestionId[question.id]?.isRight ?? null;
+                            {orderedQuestionIds.map((questionId, index) => {
+                                const answered = Boolean(answersByQuestionId[questionId]);
+                                const isRight = answersByQuestionId[questionId]?.isRight ?? null;
                                 const isActive = index === currentIndex;
 
                                 const colorClass =
-                                    answered && (isTheoryMode || examReviewMode)
+                                    answered && (isPracticeMode || examReviewMode)
                                         ? isRight
                                             ? ' is-correct'
                                             : ' is-wrong'
@@ -843,7 +1079,7 @@ const TestDetail: React.FC = () => {
 
                                 return (
                                     <button
-                                        key={question.id}
+                                        key={questionId}
                                         id={`theory-dot-${index}`}
                                         type="button"
                                         className={`theory-dot-btn${isActive ? ' is-active' : ''}${colorClass}`}
@@ -857,41 +1093,49 @@ const TestDetail: React.FC = () => {
                     </div>
 
                     <div ref={scrollBodyRef} className="theory-scrollable-body">
-                        {currentQuestionImageSrc && (
-                            <div className="theory-image-wrap">
-                                <img src={currentQuestionImageSrc} alt="question" className="theory-image"/>
+                        {isCurrentQuestionLoading ? (
+                            <div className="theory-question-loader">
+                                <IonSpinner name="crescent" color="primary"/>
                             </div>
+                        ) : (
+                            <>
+                                {currentQuestionImageSrc && (
+                                    <div className="theory-image-wrap">
+                                        <img src={currentQuestionImageSrc} alt="question" className="theory-image"/>
+                                    </div>
+                                )}
+
+                                <h2 className="theory-question-text">{currentQuestion?.title}</h2>
+
+                                <div className="theory-answer-list">
+                                    {currentQuestion?.answers.map((answer, index) => {
+                                        const isSelected = selectedAnswerId === answer.id;
+                                        const showRight = shouldRevealAnswerFeedback && answer.is_right;
+                                        const showWrong = shouldRevealAnswerFeedback && isSelected && !answer.is_right;
+                                        const answerDisabled = examReviewMode || (isPracticeMode && isAnswered);
+
+                                        return (
+                                            <button
+                                                key={answer.id}
+                                                type="button"
+                                                className={`theory-answer-btn${isSelected ? ' is-selected' : ''}${showRight ? ' is-right' : ''}${showWrong ? ' is-wrong' : ''}`}
+                                                onClick={() => handleAnswer(answer.id)}
+                                                disabled={answerDisabled}
+                                            >
+                                                <span className="theory-answer-number">{index + 1}.</span>
+                                                <span className="theory-answer-text">{answer.title}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </>
                         )}
-
-                        <h2 className="theory-question-text">{currentQuestion?.title}</h2>
-
-                        <div className="theory-answer-list">
-                            {currentQuestion?.answers.map((answer, index) => {
-                                const isSelected = selectedAnswerId === answer.id;
-                                const showRight = shouldRevealAnswerFeedback && answer.is_right;
-                                const showWrong = shouldRevealAnswerFeedback && isSelected && !answer.is_right;
-                                const answerDisabled = examReviewMode;
-
-                                return (
-                                    <button
-                                        key={answer.id}
-                                        type="button"
-                                        className={`theory-answer-btn${isSelected ? ' is-selected' : ''}${showRight ? ' is-right' : ''}${showWrong ? ' is-wrong' : ''}`}
-                                        onClick={() => handleAnswer(answer.id)}
-                                        disabled={answerDisabled}
-                                    >
-                                        <span className="theory-answer-number">{index + 1}.</span>
-                                        <span className="theory-answer-text">{answer.title}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
 
                         <div className="theory-actions-row">
                             <div className="theory-footer-row">
                                 {canGoNext ? (
                                     <IonButton expand="block" className="theory-next-btn" onClick={handleNext}>
-                                        {currentIndex === questions.length - 1 ? t('finish') : 'Հաջորդ հարց'}
+                                        {currentIndex === totalQuestions - 1 ? t('finish') : 'Հաջորդ հարց'}
                                     </IonButton>
                                 ) : (
                                     <div className="theory-footer-placeholder"/>

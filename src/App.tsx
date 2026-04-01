@@ -68,7 +68,7 @@ const AppContent: React.FC = () => {
   const hideMainTabBar =
     location.pathname === '/theory-tests'
     || location.pathname.startsWith('/theory-tests/')
-    || location.pathname === '/smart-training';
+    || location.pathname.startsWith('/smart-training');
   
   useEffect(() => {
     dbService.init();
@@ -83,6 +83,7 @@ const AppContent: React.FC = () => {
         <Route exact path="/theory-tests">{withRouteSuspense(<TheoryTestsPage />)}</Route>
         <Route exact path="/theory-tests/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
         <Route exact path="/smart-training">{withRouteSuspense(<SmartTrainingPage />)}</Route>
+        <Route exact path="/smart-training/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
         <Route exact path="/favorites">{withRouteSuspense(<FavoritesPage />)}</Route>
         <Route exact path="/exam">{withRouteSuspense(<ExamPage />)}</Route>
         <Route exact path="/errors">{withRouteSuspense(<WrongQuestionsPage />)}</Route>

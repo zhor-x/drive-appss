@@ -14,13 +14,13 @@ import { chevronBackOutline, sparklesOutline } from 'ionicons/icons';
 import React, { useCallback, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
-import { dbService, SmartTheoryTopicItem } from '../services/DatabaseService';
+import { dbService, SmartTrainingFocusItem } from '../services/DatabaseService';
 import './SmartTraining.css';
 
 const SmartTraining: React.FC = () => {
   const history = useHistory();
   const { langId, t } = useLanguage();
-  const [items, setItems] = useState<SmartTheoryTopicItem[]>([]);
+  const [items, setItems] = useState<SmartTrainingFocusItem[]>([]);
   const [loading, setLoading] = useState(true);
   const loadInFlightRef = useRef(false);
 
@@ -32,10 +32,10 @@ const SmartTraining: React.FC = () => {
     loadInFlightRef.current = true;
     setLoading(true);
     try {
-      const data = await dbService.getSmartTrainingTopics(langId);
+      const data = await dbService.getSmartTrainingFocuses(langId);
       setItems(data);
     } catch (err) {
-      console.error('Failed to load smart training topics', err);
+      console.error('Failed to load smart training focuses', err);
       setItems([]);
     } finally {
       setLoading(false);
@@ -51,16 +51,12 @@ const SmartTraining: React.FC = () => {
     history.replace('/home');
   };
 
-  const openTopic = (topicId: number) => {
-    history.push(`/theory-tests/${topicId}`);
+  const openFocus = (focusId: string) => {
+    history.push(`/smart-training/${encodeURIComponent(focusId)}`);
   };
 
-  const getTopicName = (topic: SmartTheoryTopicItem) => {
-    return topic.description || topic.title || `${t('category_test')} ${topic.id}`;
-  };
-
-  const getReasonLabel = (topic: SmartTheoryTopicItem) => {
-    return topic.recommendation_reason === 'weak'
+  const getReasonLabel = (focus: SmartTrainingFocusItem) => {
+    return focus.recommendation_reason === 'weak'
       ? t('smart_training_reason_weak')
       : t('smart_training_reason_incomplete');
   };
@@ -111,8 +107,8 @@ const SmartTraining: React.FC = () => {
           <div className="smart-wrap">
             <section className="smart-hero-card">
               <div className="smart-hero-eyebrow">{t('smart_training_primary')}</div>
-              <h2>{getTopicName(featuredTopic)}</h2>
-              <p>{t('smart_training_intro')}</p>
+              <h2>{featuredTopic.title}</h2>
+              <p>{featuredTopic.description}</p>
 
               <div className="smart-hero-chips">
                 <span className={`smart-reason-chip${featuredTopic.recommendation_reason === 'weak' ? ' is-weak' : ''}`}>
@@ -129,7 +125,7 @@ const SmartTraining: React.FC = () => {
                 </span>
               </div>
 
-              <IonButton expand="block" className="smart-hero-button" onClick={() => openTopic(featuredTopic.id)}>
+              <IonButton expand="block" className="smart-hero-button" onClick={() => openFocus(featuredTopic.id)}>
                 {t('smart_training_start')}
               </IonButton>
             </section>
@@ -141,12 +137,12 @@ const SmartTraining: React.FC = () => {
                     key={topic.id}
                     type="button"
                     className="smart-topic-card"
-                    onClick={() => openTopic(topic.id)}
+                    onClick={() => openFocus(topic.id)}
                   >
                     <div className="smart-topic-head">
                       <div>
-                        <div className="smart-topic-id">#{topic.id}</div>
-                        <h3>{getTopicName(topic)}</h3>
+                        <h3>{topic.title}</h3>
+                        <p className="smart-topic-description">{topic.description}</p>
                       </div>
                       <span className={`smart-reason-chip${topic.recommendation_reason === 'weak' ? ' is-weak' : ''}`}>
                         {getReasonLabel(topic)}

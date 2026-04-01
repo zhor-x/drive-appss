@@ -83,7 +83,9 @@ ion-tab-button {
 
 
 .button {
-  color: var(--app-text-main);
+  /*color: var(--app-text-main);*/
+  border-radius: 16px;
+  --border-radius: 8px;
 }
 .main-tab-btn ion-icon {
   font-size: clamp(20px, 5.8vw, 24px);
@@ -196,4 +198,9 @@ ion-content {
     width: calc(100% - 24px);
     padding-inline: 1px;
   }
+}
+
+.theory-back-btn, .smart-back-btn{
+  color: var(--app-text-main) !important;
+  --color: var(--app-text-main) !important;
 }

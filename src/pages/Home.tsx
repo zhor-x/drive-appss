@@ -11,10 +11,13 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
+  useIonViewDidEnter,
+  useIonViewWillLeave,
   useIonViewWillEnter,
 } from '@ionic/react';
+import { Capacitor } from '@capacitor/core';
 import {carSportOutline, layersOutline, settingsOutline, sparklesOutline, starOutline,} from 'ionicons/icons';
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import {useHistory} from 'react-router-dom';
 import {useLanguage} from '../context/LanguageContext';
 import {dbService, StatsSummary} from '../services/DatabaseService';
@@ -29,12 +32,19 @@ const initialStats: StatsSummary = {
   ticketsTotal: 0,
 };
 
+type IonBackButtonEvent = CustomEvent<{
+  register: (priority: number, handler: () => void | Promise<void>) => void;
+}>;
+
+const HOME_BACK_BUTTON_PRIORITY = 1000;
+
 const Home: React.FC = () => {
   const history = useHistory();
   const { t } = useLanguage();
   const [stats, setStats] = useState<StatsSummary>(initialStats);
   const [loading, setLoading] = useState(true);
   const [randomLoading, setRandomLoading] = useState(false);
+  const backButtonListenerRef = useRef<((event: IonBackButtonEvent) => void) | null>(null);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -50,6 +60,38 @@ const Home: React.FC = () => {
 
   useIonViewWillEnter(() => {
     loadStats();
+  });
+
+  const attachBackButtonListener = useCallback(() => {
+    if (Capacitor.getPlatform() !== 'android' || backButtonListenerRef.current || typeof document === 'undefined') {
+      return;
+    }
+
+    const listener = (event: IonBackButtonEvent) => {
+      event.detail.register(HOME_BACK_BUTTON_PRIORITY, () => {
+        return;
+      });
+    };
+
+    document.addEventListener('ionBackButton', listener as EventListener);
+    backButtonListenerRef.current = listener;
+  }, []);
+
+  const detachBackButtonListener = useCallback(() => {
+    if (!backButtonListenerRef.current || typeof document === 'undefined') {
+      return;
+    }
+
+    document.removeEventListener('ionBackButton', backButtonListenerRef.current as EventListener);
+    backButtonListenerRef.current = null;
+  }, []);
+
+  useIonViewDidEnter(() => {
+    attachBackButtonListener();
+  });
+
+  useIonViewWillLeave(() => {
+    detachBackButtonListener();
   });
 
   const openRandomExam = useCallback(async () => {
@@ -152,7 +194,7 @@ const Home: React.FC = () => {
           <div className="home-links-grid">
             <button className="home-link-card home-link-card-smart" onClick={() => history.push('/smart-training')}>
               <IonIcon icon={sparklesOutline} className="home-link-icon home-link-icon-smart" />
-              <h3>{t('smart_training')}</h3>
+              <h3>{t('smart_training')} BETA</h3>
               <p>{t('smart_training_hint')}</p>
             </button>
 

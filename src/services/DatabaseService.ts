@@ -59,13 +59,70 @@ export interface TheoryTopicItem {
   solved_count: number;
 }
 
-export interface SmartTheoryTopicItem extends TheoryTopicItem {
+export interface SmartTrainingFocusItem {
   accuracy: number;
   answered_count: number;
   correct_count: number;
+  description: string;
+  id: string;
+  latest_wrong_count: number;
+  question_count: number;
   recommendation_reason: 'weak' | 'incomplete';
+  title: string;
+  total_attempts: number;
   wrong_count: number;
 }
+
+export type SmartTheoryTopicItem = SmartTrainingFocusItem;
+
+type LocalizedSmartText = {
+  am: string;
+  ru: string;
+};
+
+type SmartTrainingFocusPattern = {
+  all: string[][];
+};
+
+type SmartTrainingFocusMatchMode = 'group' | 'group_and_pattern' | 'group_or_pattern' | 'pattern';
+type SmartTrainingFocusTextScope = 'context' | 'question';
+
+type SmartTrainingFocusDefinition = {
+  description: LocalizedSmartText;
+  excludePatterns?: SmartTrainingFocusPattern[];
+  excludeTextScope?: SmartTrainingFocusTextScope;
+  groupIds?: number[];
+  id: string;
+  matchMode?: SmartTrainingFocusMatchMode;
+  minQuestionCount?: number;
+  patterns?: SmartTrainingFocusPattern[];
+  patternTextScope?: SmartTrainingFocusTextScope;
+  title: LocalizedSmartText;
+};
+
+type SmartTrainingQuestionProfile = {
+  groupId: number | null;
+  id: number;
+  focusIds: string[];
+};
+
+type SmartTrainingAnswerEvent = {
+  eventAt: string;
+  isRight: boolean;
+  questionId: number;
+};
+
+type SmartTrainingQuestionStats = {
+  correctAttempts: number;
+  latestEventAt: string;
+  latestIsRight: boolean | null;
+  totalAttempts: number;
+  wrongAttempts: number;
+};
+
+type SmartTrainingComputedFocus = SmartTrainingFocusItem & {
+  question_ids: number[];
+};
 
 export interface FavoriteQuestionItem {
   id: number;
@@ -347,6 +404,364 @@ const resolveRoadSignCode = (rawCode: unknown, rawTitle: unknown): string => {
   return firstToken ?? '';
 };
 
+const normalizeSmartTrainingText = (value: string): string =>
+  String(value ?? '')
+    .toLowerCase()
+    .replace(/[^0-9a-zа-яё\u0531-\u0587]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const includesAnyKeyword = (text: string, keywords: string[]): boolean =>
+  keywords.some((keyword) => text.includes(keyword));
+
+const matchesSmartTrainingPattern = (text: string, pattern: SmartTrainingFocusPattern): boolean =>
+  pattern.all.every((keywordGroup) => includesAnyKeyword(text, keywordGroup));
+
+const matchesAnySmartTrainingPattern = (text: string, patterns?: SmartTrainingFocusPattern[]): boolean =>
+  (patterns ?? []).some((pattern) => matchesSmartTrainingPattern(text, pattern));
+
+const matchesSmartTrainingFocus = (
+  questionText: string,
+  contextText: string,
+  groupId: number | null,
+  definition: SmartTrainingFocusDefinition,
+): boolean => {
+  const groupMatch = groupId !== null && (definition.groupIds ?? []).includes(groupId);
+  const patternMatchText = definition.patternTextScope === 'question' ? questionText : contextText;
+  const excludeMatchText = definition.excludeTextScope === 'question' ? questionText : contextText;
+  const patternMatch = matchesAnySmartTrainingPattern(patternMatchText, definition.patterns);
+  const excludedPatternMatch = matchesAnySmartTrainingPattern(excludeMatchText, definition.excludePatterns);
+
+  if (excludedPatternMatch) {
+    return false;
+  }
+
+  switch (definition.matchMode ?? (definition.groupIds ? 'group_or_pattern' : 'pattern')) {
+    case 'group':
+      return groupMatch;
+    case 'group_and_pattern':
+      return groupMatch && patternMatch;
+    case 'group_or_pattern':
+      return groupMatch || patternMatch;
+    case 'pattern':
+    default:
+      return patternMatch;
+  }
+};
+
+const SMART_TRAINING_FOCUS_DEFINITIONS: SmartTrainingFocusDefinition[] = [
+  {
+    id: 'intersection_priority',
+    title: {
+      am: 'Խաչմերուկներ և առաջնահերթություն',
+      ru: 'Перекрестки и приоритет',
+    },
+    description: {
+      am: 'Նշաններ, ճանապարհ զիջելու հերթականություն, հավասարազոր ճանապարհներ',
+      ru: 'Знаки приоритета, очередность проезда и равнозначные дороги',
+    },
+    groupIds: [5],
+    matchMode: 'group',
+    minQuestionCount: 5,
+  },
+  {
+    id: 'regulated_intersections',
+    title: {
+      am: 'Կարգավորվող խաչմերուկներ',
+      ru: 'Регулируемые перекрестки',
+    },
+    description: {
+      am: 'Լուսացույցով կարգավորվող խաչմերուկների անցում և թույլատրելի ուղղություններ',
+      ru: 'Проезд регулируемых перекрестков, сигналы светофора и разрешенные направления',
+    },
+    excludePatterns: [
+      {
+        all: [['регулиров', 'կարգավոր']],
+      },
+    ],
+    excludeTextScope: 'question',
+    groupIds: [6],
+    matchMode: 'group',
+    minQuestionCount: 4,
+  },
+  {
+    id: 'traffic_controller',
+    title: {
+      am: 'Կարգավորող',
+      ru: 'Регулировщик',
+    },
+    description: {
+      am: 'Կարգավորողի ժեստեր, ազդանշաններ և դրանցով երթևեկության կանոնները',
+      ru: 'Жесты регулировщика, его сигналы и правила движения по ним',
+    },
+    groupIds: [6],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['регулиров', 'կարգավոր']],
+      },
+    ],
+  },
+  {
+    id: 'legal_basics',
+    title: {
+      am: 'Օրենք և հիմնական հասկացություններ',
+      ru: 'Закон и основные понятия',
+    },
+    description: {
+      am: 'Վարորդի պարտականություններ, փաստաթղթեր և ճանապարհային երթևեկության հիմնական հասկացություններ',
+      ru: 'Обязанности водителя, документы и базовые понятия дорожного движения',
+    },
+    groupIds: [2],
+    matchMode: 'group',
+    minQuestionCount: 4,
+  },
+  {
+    id: 'roundabout',
+    title: {
+      am: 'Շրջանաձև երթևեկություն',
+      ru: 'Круговое движение',
+    },
+    description: {
+      am: 'Մուտք, ելք և առաջնահերթություն շրջանաձև երթևեկությամբ խաչմերուկում',
+      ru: 'Въезд, выезд и приоритет на перекрестках с круговым движением',
+    },
+    groupIds: [1],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['кругов', 'кольцев', 'շրջանաձև']],
+      },
+    ],
+  },
+  {
+    id: 'turns_and_uturns',
+    title: {
+      am: 'Շրջադարձ և հետադարձ',
+      ru: 'Повороты и разворот',
+    },
+    description: {
+      am: 'Ձախ և աջ շրջադարձ, հետադարձ, ճիշտ հետագիծ',
+      ru: 'Левый и правый поворот, разворот и выбор траектории',
+    },
+    groupIds: [1],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 4,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['поворот', 'разворот', 'շրջադարձ', 'հետադարձ']],
+      },
+    ],
+  },
+  {
+    id: 'lane_positioning',
+    title: {
+      am: 'Գոտի և դասավորվածություն',
+      ru: 'Полоса и расположение',
+    },
+    description: {
+      am: 'Գոտու ընտրություն, վերադասավորում, երթևեկելի մասում ճիշտ դիրքավորում',
+      ru: 'Выбор полосы, перестроение и правильное расположение на дороге',
+    },
+    groupIds: [1],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 4,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['полос', 'ряд', 'перестро', 'траектор', 'գոտի', 'վերադասավորվ', 'հետքծ']],
+      },
+    ],
+  },
+  {
+    id: 'overtaking',
+    title: {
+      am: 'Վազանց',
+      ru: 'Обгон',
+    },
+    description: {
+      am: 'Վազանց, առաջանցում և հանդիպակաց ուղղությամբ շարժում',
+      ru: 'Обгон, опережение и движение по встречной полосе',
+    },
+    groupIds: [9],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['обгон', 'опереж', 'встречн полос', 'վազանց', 'առաջանց', 'հանդիպակաց գոտ']],
+      },
+    ],
+  },
+  {
+    id: 'signals_and_lights',
+    title: {
+      am: 'Ազդանշաններ և լուսային սարքեր',
+      ru: 'Сигналы и световые приборы',
+    },
+    description: {
+      am: 'Նախազգուշացնող ազդանշաններ, լուսային սարքերի կիրառում և հատուկ ազդանշաններ',
+      ru: 'Предупредительные сигналы, применение световых приборов и спецсигналы',
+    },
+    excludePatterns: [
+      {
+        all: [['переезд', 'шлагбаум', 'поезд', 'железнодорож', 'երկաթուղ', 'գնացք']],
+      },
+    ],
+    excludeTextScope: 'question',
+    groupIds: [9],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 4,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['сигнал', 'маяч', 'фар', 'свет', 'аварийн', 'ազդանշ', 'փար', 'լույս', 'թարթիչ']],
+      },
+    ],
+  },
+  {
+    id: 'railroad_crossings',
+    title: {
+      am: 'Երկաթուղային անցումներ',
+      ru: 'Железнодорожные переезды',
+    },
+    description: {
+      am: 'Կանգառ, անցում և անվտանգության կանոններ երկաթուղային անցումներում',
+      ru: 'Остановка, проезд и правила безопасности на железнодорожных переездах',
+    },
+    groupIds: [9],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['переезд', 'шлагбаум', 'поезд', 'железнодорож', 'երկաթուղ', 'գնացք']],
+      },
+    ],
+  },
+  {
+    id: 'stopping_and_parking',
+    title: {
+      am: 'Կանգառ և կայանում',
+      ru: 'Остановка и стоянка',
+    },
+    description: {
+      am: 'Կանգառի և կայանման արգելքներ, վայրեր և բացառություններ',
+      ru: 'Запреты, места и исключения для остановки и стоянки',
+    },
+    groupIds: [7],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 4,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['остановк', 'стоянк', 'կանգառ', 'կայանում']],
+      },
+    ],
+  },
+  {
+    id: 'pedestrians',
+    title: {
+      am: 'Հետիոտներ և անցումներ',
+      ru: 'Пешеходы и переходы',
+    },
+    description: {
+      am: 'Հետիոտնային անցումներ, հետիոտնի իրավունքներ և վարորդի պարտականություններ',
+      ru: 'Пешеходные переходы, приоритет пешеходов и обязанности водителя',
+    },
+    groupIds: [1, 5, 7, 9],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['пешеход', 'переход', 'հետիոտն', 'անցում']],
+      },
+    ],
+  },
+  {
+    id: 'road_signs',
+    title: {
+      am: 'Ճանապարհային նշաններ',
+      ru: 'Дорожные знаки',
+    },
+    description: {
+      am: 'Նշանների իմաստը, ցուցանակները և նշանների պահանջները',
+      ru: 'Смысл знаков, таблички и требования дорожных знаков',
+    },
+    groupIds: [4],
+    matchMode: 'group',
+    minQuestionCount: 5,
+  },
+  {
+    id: 'road_markings',
+    title: {
+      am: 'Ճանապարհային գծանշում',
+      ru: 'Дорожная разметка',
+    },
+    description: {
+      am: 'Գծանշման տեսակներ, գոտիներ և դրանց պահանջները',
+      ru: 'Типы разметки, полосы и требования дорожной разметки',
+    },
+    groupIds: [7],
+    matchMode: 'group_and_pattern',
+    minQuestionCount: 3,
+    patternTextScope: 'question',
+    patterns: [
+      {
+        all: [['разметк', 'стоп лини', 'գծանշ', 'ստոպ գիծ']],
+      },
+    ],
+  },
+  {
+    id: 'speed_and_transport',
+    title: {
+      am: 'Արագություն և փոխադրում',
+      ru: 'Скорость и перевозка',
+    },
+    description: {
+      am: 'Արագության սահմանափակումներ, քարշակում, ուղևորների և բեռների փոխադրում',
+      ru: 'Ограничения скорости, буксировка, перевозка людей и грузов',
+    },
+    groupIds: [8],
+    matchMode: 'group',
+    minQuestionCount: 4,
+  },
+  {
+    id: 'vehicle_faults',
+    title: {
+      am: 'Անսարքություններ և շահագործում',
+      ru: 'Неисправности и эксплуатация',
+    },
+    description: {
+      am: 'Տրանսպորտային միջոցի անսարքություններն ու շահագործման սահմանափակումները',
+      ru: 'Неисправности автомобиля и ограничения эксплуатации',
+    },
+    groupIds: [3],
+    matchMode: 'group',
+    minQuestionCount: 3,
+  },
+  {
+    id: 'first_aid_and_safety',
+    title: {
+      am: 'Առաջին օգնություն և անվտանգություն',
+      ru: 'Первая помощь и безопасность',
+    },
+    description: {
+      am: 'Վարորդի գործողությունները վթարի ժամանակ և առաջին օգնության հիմունքները',
+      ru: 'Действия водителя при ДТП и основы первой помощи',
+    },
+    groupIds: [10],
+    matchMode: 'group',
+    minQuestionCount: 3,
+  },
+];
+
 class DatabaseService {
   private sqlite: SQLiteConnection = new SQLiteConnection(CapacitorSQLite);
   private db: SQLiteDBConnection | null = null;
@@ -358,6 +773,9 @@ class DatabaseService {
   private roadSafetyLawSeedPromise: Promise<void> | null = null;
   private exploitationSeedPromise: Promise<void> | null = null;
   private roadMarkingsSeedPromise: Promise<void> | null = null;
+  private theoryQuestionIdsCache = new Map<number, number[]>();
+  private questionDetailsCache = new Map<string, QuestionItem>();
+  private smartTrainingProfilesCache = new Map<string, SmartTrainingQuestionProfile[]>();
 
   async init() {
     if (this.initPromise) return this.initPromise;
@@ -1511,46 +1929,83 @@ class DatabaseService {
     return answersByQuestionId;
   }
 
+  private getQuestionCacheKey(questionId: number, langId: number): string {
+    return `${langId}:${questionId}`;
+  }
+
   private async loadQuestionsByIds(questionIds: number[], langId: number): Promise<QuestionItem[]> {
-    if (questionIds.length === 0) return [];
+    const normalizedQuestionIds = questionIds
+      .map((id) => this.toInt(id, 0))
+      .filter((id) => id > 0);
 
-    const db = await this.ensureDb();
-    const resolvedLangId = await this.resolveLanguageIdForTable('question_translations', langId);
+    if (normalizedQuestionIds.length === 0) return [];
 
-    const placeholders = questionIds.map(() => '?').join(', ');
-    const rowsRes = await db.query(
-      `SELECT
-          CAST(q.id AS INTEGER) as id,
-          q.image as image,
-          CAST(q.group_id AS INTEGER) as group_id,
-          qt.title as title
-       FROM questions q
-       LEFT JOIN question_translations qt
-         ON CAST(q.id AS TEXT) = CAST(qt.question_id AS TEXT)
-        AND CAST(qt.language_id AS TEXT) = ?
-       WHERE CAST(q.id AS TEXT) IN (${placeholders})`,
-      [resolvedLangId, ...questionIds.map(String)],
-    );
+    const questionsById = new Map<number, QuestionItem>();
+    const missingQuestionIds: number[] = [];
+    const missingQuestionIdsSet = new Set<number>();
 
-    const rows = rowsRes.values ?? [];
-    const byId = new Map<number, DbRow>();
-    for (const row of rows) {
-      byId.set(this.toInt(row.id), row);
+    for (const questionId of normalizedQuestionIds) {
+      const cachedQuestion = this.questionDetailsCache.get(this.getQuestionCacheKey(questionId, langId));
+      if (cachedQuestion) {
+        questionsById.set(questionId, cachedQuestion);
+        continue;
+      }
+
+      if (!missingQuestionIdsSet.has(questionId)) {
+        missingQuestionIds.push(questionId);
+        missingQuestionIdsSet.add(questionId);
+      }
     }
-    const answersByQuestionId = await this.loadAnswersForQuestions(questionIds, langId);
+
+    if (missingQuestionIds.length > 0) {
+      const db = await this.ensureDb();
+      const resolvedLangId = await this.resolveLanguageIdForTable('question_translations', langId);
+
+      const placeholders = missingQuestionIds.map(() => '?').join(', ');
+      const rowsRes = await db.query(
+        `SELECT
+            CAST(q.id AS INTEGER) as id,
+            q.image as image,
+            CAST(q.group_id AS INTEGER) as group_id,
+            qt.title as title
+         FROM questions q
+         LEFT JOIN question_translations qt
+           ON CAST(q.id AS TEXT) = CAST(qt.question_id AS TEXT)
+          AND CAST(qt.language_id AS TEXT) = ?
+         WHERE CAST(q.id AS TEXT) IN (${placeholders})`,
+        [resolvedLangId, ...missingQuestionIds.map(String)],
+      );
+
+      const rows = rowsRes.values ?? [];
+      const byId = new Map<number, DbRow>();
+      for (const row of rows) {
+        byId.set(this.toInt(row.id), row);
+      }
+      const answersByQuestionId = await this.loadAnswersForQuestions(missingQuestionIds, langId);
+
+      for (const questionId of missingQuestionIds) {
+        const row = byId.get(questionId);
+        if (!row) continue;
+
+        const question: QuestionItem = {
+          id: questionId,
+          image: row.image ? String(row.image) : null,
+          group_id: row.group_id !== null && row.group_id !== undefined ? this.toInt(row.group_id, 0) : null,
+          title: String(row.title ?? ''),
+          answers: answersByQuestionId.get(questionId) ?? [],
+        };
+
+        questionsById.set(questionId, question);
+        this.questionDetailsCache.set(this.getQuestionCacheKey(questionId, langId), question);
+      }
+    }
 
     const output: QuestionItem[] = [];
-    for (const qId of questionIds) {
-      const row = byId.get(qId);
-      if (!row) continue;
-
-      output.push({
-        id: qId,
-        image: row.image ? String(row.image) : null,
-        group_id: row.group_id !== null && row.group_id !== undefined ? this.toInt(row.group_id, 0) : null,
-        title: String(row.title ?? ''),
-        answers: answersByQuestionId.get(qId) ?? [],
-      });
+    for (const questionId of normalizedQuestionIds) {
+      const question = questionsById.get(questionId);
+      if (question) {
+        output.push(question);
+      }
     }
 
     return output;
@@ -1962,6 +2417,293 @@ class DatabaseService {
     };
   }
 
+  private getLocalizedSmartText(value: LocalizedSmartText, langId: number): string {
+    return this.toInt(langId, 102) === 101 ? value.ru : value.am;
+  }
+
+  private getSmartTrainingFocusDefinition(focusId: string): SmartTrainingFocusDefinition | null {
+    return SMART_TRAINING_FOCUS_DEFINITIONS.find((definition) => definition.id === focusId) ?? null;
+  }
+
+  getSmartTrainingFocusMeta(
+    focusId: string,
+    langId: number,
+  ): Pick<SmartTrainingFocusItem, 'description' | 'id' | 'title'> | null {
+    const definition = this.getSmartTrainingFocusDefinition(focusId);
+    if (!definition) {
+      return null;
+    }
+
+    return {
+      id: definition.id,
+      title: this.getLocalizedSmartText(definition.title, langId),
+      description: this.getLocalizedSmartText(definition.description, langId),
+    };
+  }
+
+  private async getSmartTrainingQuestionProfiles(langId: number): Promise<SmartTrainingQuestionProfile[]> {
+    const db = await this.ensureDb();
+    const resolvedQuestionLangId = await this.resolveLanguageIdForTable('question_translations', langId);
+    const resolvedGroupLangId = await this.resolveLanguageIdForTable('group_translations', langId);
+    const cacheKey = `${resolvedQuestionLangId}:${resolvedGroupLangId}`;
+    const cachedProfiles = this.smartTrainingProfilesCache.get(cacheKey);
+
+    if (cachedProfiles) {
+      return cachedProfiles;
+    }
+
+    const res = await db.query(
+      `SELECT
+          CAST(q.id AS INTEGER) as id,
+          CAST(q.group_id AS INTEGER) as group_id,
+          qt.title as question_title,
+          gt.title as group_title,
+          gt.description as group_description
+       FROM questions q
+       LEFT JOIN question_translations qt
+         ON CAST(q.id AS TEXT) = CAST(qt.question_id AS TEXT)
+        AND CAST(qt.language_id AS TEXT) = ?
+       LEFT JOIN group_translations gt
+         ON CAST(q.group_id AS TEXT) = CAST(gt.group_id AS TEXT)
+        AND CAST(gt.language_id AS TEXT) = ?
+       ORDER BY CAST(q.id AS INTEGER)`,
+      [resolvedQuestionLangId, resolvedGroupLangId],
+    );
+
+    const profiles = (res.values ?? [])
+      .map((row: DbRow) => {
+        const questionId = this.toInt(row.id, 0);
+        const groupId = row.group_id !== null && row.group_id !== undefined
+          ? this.toInt(row.group_id, 0)
+          : null;
+
+        if (questionId <= 0) {
+          return null;
+        }
+
+        const questionText = normalizeSmartTrainingText(String(row.question_title ?? ''));
+        const context = normalizeSmartTrainingText([
+          String(row.question_title ?? ''),
+          String(row.group_title ?? ''),
+          String(row.group_description ?? ''),
+        ].join(' '));
+
+        const focusIds = SMART_TRAINING_FOCUS_DEFINITIONS
+          .filter((definition) => matchesSmartTrainingFocus(questionText, context, groupId, definition))
+          .map((definition) => definition.id);
+
+        if (focusIds.length === 0) {
+          return null;
+        }
+
+        return {
+          id: questionId,
+          groupId,
+          focusIds,
+        } as SmartTrainingQuestionProfile;
+      })
+      .filter((profile): profile is SmartTrainingQuestionProfile => profile !== null);
+
+    this.smartTrainingProfilesCache.set(cacheKey, profiles);
+    return profiles;
+  }
+
+  private async getSmartTrainingAnswerEvents(): Promise<SmartTrainingAnswerEvent[]> {
+    const db = await this.ensureDb();
+
+    const [theoryRes, examRes] = await Promise.all([
+      db.query(
+        `SELECT
+            CAST(question_id AS INTEGER) as question_id,
+            CAST(COALESCE(is_right, '0') AS INTEGER) as is_right,
+            COALESCE(NULLIF(CAST(updated_at AS TEXT), ''), NULLIF(CAST(created_at AS TEXT), ''), '') as event_at
+         FROM user_statistics
+         WHERE CAST(user_id AS TEXT) = ?`,
+        [APP_USER_ID],
+      ),
+      db.query(
+        `SELECT
+            CAST(tq.question_id AS INTEGER) as question_id,
+            CAST(COALESCE(ueq.is_right, '0') AS INTEGER) as is_right,
+            COALESCE(
+              NULLIF(CAST(ueq.updated_at AS TEXT), ''),
+              NULLIF(CAST(ueq.created_at AS TEXT), ''),
+              NULLIF(CAST(uet.updated_at AS TEXT), ''),
+              NULLIF(CAST(uet.created_at AS TEXT), ''),
+              ''
+            ) as event_at
+         FROM user_exam_test_questions ueq
+         JOIN user_exam_tests uet
+           ON CAST(ueq.user_exam_test_id AS TEXT) = CAST(uet.id AS TEXT)
+         JOIN test_questions tq
+           ON CAST(ueq.test_question_id AS TEXT) = CAST(tq.id AS TEXT)
+         WHERE CAST(uet.user_id AS TEXT) = ?`,
+        [APP_USER_ID],
+      ),
+    ]);
+
+    return [...(theoryRes.values ?? []), ...(examRes.values ?? [])]
+      .map((row: DbRow) => ({
+        questionId: this.toInt(row.question_id, 0),
+        isRight: this.toInt(row.is_right, 0) === 1,
+        eventAt: String(row.event_at ?? ''),
+      }))
+      .filter((event) => event.questionId > 0);
+  }
+
+  private buildSmartTrainingQuestionStats(
+    events: SmartTrainingAnswerEvent[],
+  ): Map<number, SmartTrainingQuestionStats> {
+    const statsByQuestionId = new Map<number, SmartTrainingQuestionStats>();
+
+    for (const event of events) {
+      const current = statsByQuestionId.get(event.questionId) ?? {
+        totalAttempts: 0,
+        correctAttempts: 0,
+        wrongAttempts: 0,
+        latestIsRight: null,
+        latestEventAt: '',
+      };
+
+      current.totalAttempts += 1;
+      if (event.isRight) {
+        current.correctAttempts += 1;
+      } else {
+        current.wrongAttempts += 1;
+      }
+
+      if (!current.latestEventAt || event.eventAt >= current.latestEventAt) {
+        current.latestEventAt = event.eventAt;
+        current.latestIsRight = event.isRight;
+      }
+
+      statsByQuestionId.set(event.questionId, current);
+    }
+
+    return statsByQuestionId;
+  }
+
+  private getSmartTrainingQuestionPriority(stats?: SmartTrainingQuestionStats): number {
+    if (!stats || stats.totalAttempts === 0) {
+      return 2;
+    }
+
+    if (stats.latestIsRight === false) {
+      return 0;
+    }
+
+    if (stats.wrongAttempts > 0) {
+      return 1;
+    }
+
+    return 3;
+  }
+
+  private async getSmartTrainingComputedFocuses(langId: number): Promise<SmartTrainingComputedFocus[]> {
+    const questionProfiles = await this.getSmartTrainingQuestionProfiles(langId);
+    if (questionProfiles.length === 0) {
+      return [];
+    }
+
+    const questionStatsById = this.buildSmartTrainingQuestionStats(await this.getSmartTrainingAnswerEvents());
+    const computedFocuses: SmartTrainingComputedFocus[] = [];
+
+    for (const definition of SMART_TRAINING_FOCUS_DEFINITIONS) {
+      const matchedQuestions = questionProfiles.filter((profile) => profile.focusIds.includes(definition.id));
+      const questionCount = matchedQuestions.length;
+
+      if (questionCount < (definition.minQuestionCount ?? 1)) {
+        continue;
+      }
+
+      let answeredCount = 0;
+      let correctCount = 0;
+      let wrongCount = 0;
+      let latestWrongCount = 0;
+
+      const questionIds = matchedQuestions
+        .map((profile) => profile.id)
+        .sort((leftId, rightId) => {
+          const leftStats = questionStatsById.get(leftId);
+          const rightStats = questionStatsById.get(rightId);
+
+          return (
+            this.getSmartTrainingQuestionPriority(leftStats) - this.getSmartTrainingQuestionPriority(rightStats)
+            || (rightStats?.wrongAttempts ?? 0) - (leftStats?.wrongAttempts ?? 0)
+            || (rightStats?.latestEventAt ?? '').localeCompare(leftStats?.latestEventAt ?? '')
+            || leftId - rightId
+          );
+        });
+
+      for (const questionId of questionIds) {
+        const stats = questionStatsById.get(questionId);
+        if (!stats || stats.totalAttempts <= 0) {
+          continue;
+        }
+
+        answeredCount += 1;
+        correctCount += stats.correctAttempts;
+        wrongCount += stats.wrongAttempts;
+
+        if (stats.latestIsRight === false) {
+          latestWrongCount += 1;
+        }
+      }
+
+      const totalAttempts = correctCount + wrongCount;
+      if (answeredCount === 0 || totalAttempts === 0) {
+        continue;
+      }
+
+      const accuracy = Math.round((correctCount / totalAttempts) * 100);
+      const coverage = answeredCount / questionCount;
+      const recommendationReason: SmartTrainingFocusItem['recommendation_reason'] =
+        latestWrongCount > 0 || (answeredCount >= 2 && accuracy < 75)
+          ? 'weak'
+          : 'incomplete';
+
+      const shouldInclude =
+        latestWrongCount > 0
+        || wrongCount >= 2
+        || (answeredCount >= 2 && accuracy < 80)
+        || (answeredCount >= 2 && coverage < 0.45);
+
+      if (!shouldInclude) {
+        continue;
+      }
+
+      computedFocuses.push({
+        id: definition.id,
+        title: this.getLocalizedSmartText(definition.title, langId),
+        description: this.getLocalizedSmartText(definition.description, langId),
+        question_count: questionCount,
+        answered_count: answeredCount,
+        correct_count: correctCount,
+        wrong_count: wrongCount,
+        latest_wrong_count: latestWrongCount,
+        total_attempts: totalAttempts,
+        accuracy,
+        recommendation_reason: recommendationReason,
+        question_ids: questionIds,
+      });
+    }
+
+    return computedFocuses.sort((left, right) => {
+      const reasonWeight = (value: SmartTrainingFocusItem['recommendation_reason']) =>
+        value === 'weak' ? 0 : 1;
+
+      return (
+        reasonWeight(left.recommendation_reason) - reasonWeight(right.recommendation_reason)
+        || right.latest_wrong_count - left.latest_wrong_count
+        || right.wrong_count - left.wrong_count
+        || left.accuracy - right.accuracy
+        || (left.answered_count / left.question_count) - (right.answered_count / right.question_count)
+        || right.question_count - left.question_count
+        || left.title.localeCompare(right.title)
+      );
+    });
+  }
+
   async getTheoryTopics(langId: number): Promise<TheoryTopicItem[]> {
     const db = await this.ensureDb();
     const resolvedLangId = await this.resolveLanguageIdForTable('group_translations', langId);
@@ -2013,90 +2755,19 @@ class DatabaseService {
       .filter((row) => row.id > 0);
   }
 
+  async getSmartTrainingFocuses(langId: number): Promise<SmartTrainingFocusItem[]> {
+    const computedFocuses = await this.getSmartTrainingComputedFocuses(langId);
+    return computedFocuses.map(({ question_ids, ...focus }) => focus);
+  }
+
   async getSmartTrainingTopics(langId: number): Promise<SmartTheoryTopicItem[]> {
-    const db = await this.ensureDb();
-    const resolvedLangId = await this.resolveLanguageIdForTable('group_translations', langId);
+    return this.getSmartTrainingFocuses(langId);
+  }
 
-    const res = await db.query(
-      `WITH latest_user_answers AS (
-         SELECT
-           CAST(question_id AS TEXT) as question_id,
-           MAX(CAST(id AS INTEGER)) as max_id
-         FROM user_statistics
-         WHERE CAST(user_id AS TEXT) = ?
-         GROUP BY CAST(question_id AS TEXT)
-       ),
-       latest_answers AS (
-         SELECT
-           CAST(us.question_id AS TEXT) as question_id,
-           CAST(COALESCE(us.is_right, '0') AS INTEGER) as is_right
-         FROM user_statistics us
-         JOIN latest_user_answers lua
-           ON CAST(us.id AS INTEGER) = lua.max_id
-       )
-       SELECT
-          CAST(gt.group_id AS INTEGER) as id,
-          gt.title as title,
-          gt.description as description,
-          COUNT(DISTINCT CAST(q.id AS TEXT)) as question_count,
-          COUNT(DISTINCT la.question_id) as answered_count,
-          SUM(CASE WHEN la.question_id IS NOT NULL AND CAST(COALESCE(la.is_right, 0) AS INTEGER) = 1 THEN 1 ELSE 0 END) as correct_count,
-          SUM(CASE WHEN la.question_id IS NOT NULL AND CAST(COALESCE(la.is_right, 0) AS INTEGER) = 0 THEN 1 ELSE 0 END) as wrong_count
-       FROM group_translations gt
-       LEFT JOIN questions q
-         ON CAST(q.group_id AS TEXT) = CAST(gt.group_id AS TEXT)
-       LEFT JOIN latest_answers la
-         ON CAST(la.question_id AS TEXT) = CAST(q.id AS TEXT)
-       WHERE CAST(gt.language_id AS TEXT) = ?
-       GROUP BY CAST(gt.group_id AS INTEGER), gt.title, gt.description
-       ORDER BY CAST(gt.group_id AS INTEGER)`,
-      [APP_USER_ID, resolvedLangId],
-    );
-
-    return (res.values ?? [])
-      .map((row: DbRow) => {
-        const questionCount = this.toInt(row.question_count, 0);
-        const answeredCount = this.toInt(row.answered_count, 0);
-        const correctCount = this.toInt(row.correct_count, 0);
-        const wrongCount = this.toInt(row.wrong_count, 0);
-        const accuracy = answeredCount > 0
-          ? Math.round((correctCount / answeredCount) * 100)
-          : 0;
-        const recommendationReason: SmartTheoryTopicItem['recommendation_reason'] =
-          wrongCount > 0 ? 'weak' : 'incomplete';
-
-        return {
-          id: this.toInt(row.id, 0),
-          title: String(row.title ?? ''),
-          description: String(row.description ?? ''),
-          question_count: questionCount,
-          solved_count: answeredCount,
-          answered_count: answeredCount,
-          correct_count: correctCount,
-          wrong_count: wrongCount,
-          accuracy,
-          recommendation_reason: recommendationReason,
-        };
-      })
-      .filter((row) =>
-        row.id > 0
-        && row.question_count > 0
-        && row.answered_count > 0
-        && (row.wrong_count > 0 || row.answered_count < row.question_count),
-      )
-      .sort((a, b) => {
-        const reasonWeight = (value: SmartTheoryTopicItem['recommendation_reason']) =>
-          value === 'weak' ? 0 : 1;
-
-        return (
-          reasonWeight(a.recommendation_reason) - reasonWeight(b.recommendation_reason)
-          || b.wrong_count - a.wrong_count
-          || a.accuracy - b.accuracy
-          || (a.answered_count / a.question_count) - (b.answered_count / b.question_count)
-          || b.question_count - a.question_count
-          || a.id - b.id
-        );
-      });
+  async getSmartTrainingQuestionIds(focusId: string, langId: number): Promise<number[]> {
+    const computedFocuses = await this.getSmartTrainingComputedFocuses(langId);
+    const focus = computedFocuses.find((item) => item.id === focusId);
+    return focus ? [...focus.question_ids] : [];
   }
 
   async getQuestionsByTest(testId: number, langId: number): Promise<QuestionItem[]> {
@@ -2147,18 +2818,33 @@ class DatabaseService {
   }
 
   async getQuestionsByGroup(groupId: number, langId: number): Promise<QuestionItem[]> {
-    const db = await this.ensureDb();
+    const questionIds = await this.getQuestionIdsByGroup(groupId);
+    return this.loadQuestionsByIds(questionIds, langId);
+  }
 
+  async getQuestionIdsByGroup(groupId: number): Promise<number[]> {
+    const normalizedGroupId = this.toInt(groupId, 0);
+    if (normalizedGroupId <= 0) {
+      return [];
+    }
+
+    const cachedQuestionIds = this.theoryQuestionIdsCache.get(normalizedGroupId);
+    if (cachedQuestionIds) {
+      return [...cachedQuestionIds];
+    }
+
+    const db = await this.ensureDb();
     const res = await db.query(
       `SELECT CAST(id AS INTEGER) as id
        FROM questions
        WHERE CAST(group_id AS TEXT) = ?
        ORDER BY CAST(id AS INTEGER)`,
-      [String(groupId)],
+      [String(normalizedGroupId)],
     );
 
     const questionIds = (res.values ?? []).map((row: DbRow) => this.toInt(row.id, 0)).filter(Boolean);
-    return this.loadQuestionsByIds(questionIds, langId);
+    this.theoryQuestionIdsCache.set(normalizedGroupId, questionIds);
+    return [...questionIds];
   }
 
   async getFavoriteQuestions(langId: number): Promise<FavoriteQuestionItem[]> {
