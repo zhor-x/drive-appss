@@ -16,10 +16,18 @@ import {
   useIonViewWillEnter,
 } from '@ionic/react';
 import { Capacitor } from '@capacitor/core';
-import {carSportOutline, layersOutline, settingsOutline, sparklesOutline, starOutline,} from 'ionicons/icons';
+import {
+  callOutline,
+  carSportOutline,
+  layersOutline,
+  settingsOutline,
+  sparklesOutline,
+  starOutline,
+} from 'ionicons/icons';
 import React, {useCallback, useRef, useState} from 'react';
 import {useHistory} from 'react-router-dom';
 import {useLanguage} from '../context/LanguageContext';
+import logoImage from '../assets/images/logo.webp';
 import {dbService, StatsSummary} from '../services/DatabaseService';
 import './Home.css';
 
@@ -37,6 +45,8 @@ type IonBackButtonEvent = CustomEvent<{
 }>;
 
 const HOME_BACK_BUTTON_PRIORITY = 1000;
+const SUPPORT_PHONE_URI = '+37499070371';
+const SUPPORT_PHONE_LABEL = '+374 99 07 03 71';
 
 const Home: React.FC = () => {
   const history = useHistory();
@@ -130,6 +140,16 @@ const Home: React.FC = () => {
         </IonHeader>
 
         <div className="home-container">
+          <IonCard className="home-brand-card">
+            <IonCardContent className="home-brand-content">
+              <img src={logoImage} alt="Drive & Go" className="home-brand-logo" />
+              <a href={`tel:${SUPPORT_PHONE_URI}`} className="home-phone-link" aria-label={`Call ${SUPPORT_PHONE_LABEL}`}>
+                <IonIcon icon={callOutline} className="home-phone-icon" />
+                <span>{SUPPORT_PHONE_LABEL}</span>
+              </a>
+            </IonCardContent>
+          </IonCard>
+
           <IonCard className="stats-card">
             <IonCardContent>
               <h2 className="stats-title">{t('statistics')}</h2>
