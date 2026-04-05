@@ -204,3 +204,41 @@ ion-content {
   color: var(--app-text-main) !important;
   --color: var(--app-text-main) !important;
 }
+
+.rules-back-btn,
+.rules-back-btn::part(native),
+.signs-back-btn,
+.signs-back-btn::part(native) {
+  color: var(--app-text-main) !important;
+  --color: var(--app-text-main) !important;
+}
+
+.rules-back-btn span,
+.rules-back-icon,
+.signs-back-btn span,
+.signs-back-icon {
+  color: var(--app-text-main) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .theme-drivego-preview {
+    --ion-background-color: #ffffff;
+    --ion-background-color-rgb: 255, 255, 255;
+    --ion-text-color: #4d5f7c;
+    --ion-text-color-rgb: 77, 95, 124;
+    --ion-item-background: #ffffff;
+    --ion-toolbar-background: #ffffff;
+    --ion-tab-bar-background: #ffffff;
+    --ion-card-background: #ffffff;
+    --ion-border-color: #d7e0db;
+  }
+
+  .theme-drivego-preview ion-content {
+    --background: #ffffff;
+  }
+
+  .theme-drivego-preview ion-tab-bar {
+    --background: #ffffff;
+    background: #ffffff !important;
+  }
+}

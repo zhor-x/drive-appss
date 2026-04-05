@@ -76,22 +76,22 @@ const AppContent: React.FC = () => {
 
   return (
     <IonTabs>
-      <IonRouterOutlet>
-        <Route exact path="/home"><Home /></Route>
-        <Route exact path="/tests">{withRouteSuspense(<TestsPage />)}</Route>
-        <Route exact path="/tests/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
-        <Route exact path="/theory-tests">{withRouteSuspense(<TheoryTestsPage />)}</Route>
-        <Route exact path="/theory-tests/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
-        <Route exact path="/smart-training">{withRouteSuspense(<SmartTrainingPage />)}</Route>
-        <Route exact path="/smart-training/:id">{withRouteSuspense(<TestDetailPage />)}</Route>
-        <Route exact path="/favorites">{withRouteSuspense(<FavoritesPage />)}</Route>
-        <Route exact path="/exam">{withRouteSuspense(<ExamPage />)}</Route>
-        <Route exact path="/errors">{withRouteSuspense(<WrongQuestionsPage />)}</Route>
-        <Route exact path="/rules">{withRouteSuspense(<RulesPage />)}</Route>
-        <Route exact path="/signs">{withRouteSuspense(<SignsPage />)}</Route>
-        <Route exact path="/settings">{withRouteSuspense(<SettingsPage />)}</Route>
-        <Route exact path="/profile"><Redirect to="/settings" /></Route>
-        <Route exact path="/"><Redirect to="/home" /></Route>
+      <IonRouterOutlet animated={false}>
+        <Route exact path="/home" component={Home} />
+        <Route exact path="/tests" render={() => withRouteSuspense(<TestsPage />)} />
+        <Route exact path="/tests/:id" render={() => withRouteSuspense(<TestDetailPage />)} />
+        <Route exact path="/theory-tests" render={() => withRouteSuspense(<TheoryTestsPage />)} />
+        <Route exact path="/theory-tests/:id" render={() => withRouteSuspense(<TestDetailPage />)} />
+        <Route exact path="/smart-training" render={() => withRouteSuspense(<SmartTrainingPage />)} />
+        <Route exact path="/smart-training/:id" render={() => withRouteSuspense(<TestDetailPage />)} />
+        <Route exact path="/favorites" render={() => withRouteSuspense(<FavoritesPage />)} />
+        <Route exact path="/exam" render={() => withRouteSuspense(<ExamPage />)} />
+        <Route exact path="/errors" render={() => withRouteSuspense(<WrongQuestionsPage />)} />
+        <Route exact path="/rules" render={() => withRouteSuspense(<RulesPage />)} />
+        <Route exact path="/signs" render={() => withRouteSuspense(<SignsPage />)} />
+        <Route exact path="/settings" render={() => withRouteSuspense(<SettingsPage />)} />
+        <Route exact path="/profile" render={() => <Redirect to="/settings" />} />
+        <Route exact path="/" render={() => <Redirect to="/home" />} />
       </IonRouterOutlet>
       
       {!hideMainTabBar && (

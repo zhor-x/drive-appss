@@ -514,7 +514,9 @@ const Rules: React.FC = () => {
     setView('chapters');
     setSelectedSection(sectionType);
     setSelectedChapter(null);
+    setChapters([]);
     setItems([]);
+    setLoading(true);
     await loadChapters(sectionType);
   };
 
@@ -522,6 +524,8 @@ const Rules: React.FC = () => {
     if (!selectedSection) return;
     setView('items');
     setSelectedChapter(chapter);
+    setItems([]);
+    setLoading(true);
     await loadItems(selectedSection, chapter.id);
   };
 
@@ -579,7 +583,7 @@ const Rules: React.FC = () => {
           </IonToolbar>
         </IonHeader>
 
-        <div className="rules-wrap">
+        <div className="rules-wrap" key={`${view}:${selectedSection ?? 'none'}:${selectedChapter?.id ?? 'none'}`}>
           {loading ? (
             <div className="rules-loader">
               <IonSpinner name="crescent" color="primary" />
